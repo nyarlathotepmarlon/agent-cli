@@ -1,9 +1,19 @@
-import type { AgentState } from "./agent-state.js";
+import type { IdleAgentState } from "./agent-state.js";
+import {
+    createExecutionBudget,
+    type ExecutionBudgetLimits,
+} from "./execution-budget.js";
 
-export function createAgentState(): AgentState {
+export function createAgentState(
+    limits: ExecutionBudgetLimits,
+): IdleAgentState {
     return {
         status: "idle",
+
         messages: [],
-        turn: 0,
+
+        steps: [],
+
+        budget: createExecutionBudget(limits),
     };
 }

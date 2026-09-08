@@ -1,6 +1,19 @@
-import type { IdleAgentState } from "../core/agent/agent-state.js";
-import { createAgentState } from "../core/agent/create-agent-state.js";
-import type { ExecutionBudgetLimits } from "../core/agent/execution-budget.js";
+import type {
+    IdleAgentState,
+} from "../core/agent/agent-state.js";
+
+import {
+    createAgentState,
+} from "../core/agent/create-agent-state.js";
+
+import type {
+    ExecutionBudgetLimits,
+} from "../core/agent/execution-budget.js";
+
+import type {
+    ModelResolver,
+    ModelSelection,
+} from "./model-resolver.js";
 
 export type AgentRunMode =
     | "interactive"
@@ -12,6 +25,9 @@ export interface AgentRunRequest {
     readonly cwd: string;
 
     readonly mode: AgentRunMode;
+
+    readonly model:
+        ModelSelection;
 
     readonly signal: AbortSignal;
 }
@@ -25,7 +41,14 @@ export interface AgentRunResult {
 
     readonly mode: AgentRunMode;
 
-    readonly state: IdleAgentState;
+    readonly model: {
+        readonly provider: string;
+
+        readonly id: string;
+    };
+
+    readonly state:
+        IdleAgentState;
 }
 
 export interface AgentApplication {
@@ -40,25 +63,46 @@ export class DefaultAgentApplication
     public constructor(
         private readonly limits:
         ExecutionBudgetLimits,
+
+        private readonly modelResolver:
+        ModelResolver,
     ) {}
 
     public async run(
         request: AgentRunRequest,
     ): Promise<AgentRunResult> {
-        request.signal.throwIfAborted();
+        request.signal
+            .throwIfAborted();
+
+        const model =
+            this.modelResolver.resolve(
+                request.model,
+            );
 
         return {
             status: "prepared",
 
-            prompt: request.prompt,
+            prompt:
+            request.prompt,
 
-            cwd: request.cwd,
+            cwd:
+            request.cwd,
 
-            mode: request.mode,
+            mode:
+            request.mode,
 
-            state: createAgentState(
-                this.limits,
-            ),
+            model: {
+                provider:
+                model.provider,
+
+                id:
+                model.id,
+            },
+
+            state:
+                createAgentState(
+                    this.limits,
+                ),
         };
     }
 }

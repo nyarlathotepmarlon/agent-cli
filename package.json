@@ -13,7 +13,8 @@
     "typecheck": "tsc -p tsconfig.json --noEmit",
     "test": "vitest run",
     "test:watch": "vitest",
-    "lint": "eslint ."
+    "lint": "eslint .",
+    "smoke:model": "tsx scripts/openai-smoke.ts"
   },
   "devDependencies": {
     "@eslint/js": "^10.0.1",
@@ -26,6 +27,7 @@
   },
   "private": true,
   "dependencies": {
-    "commander": "^15.0.0"
+    "commander": "^15.0.0",
+    "openai": "^7.10.0"
   }
 }

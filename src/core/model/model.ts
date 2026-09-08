@@ -8,6 +8,7 @@ export interface ModelRequest {
 }
 
 export interface Model {
+    readonly provider: string;
     readonly id:string;
     generate(
         request: ModelRequest,

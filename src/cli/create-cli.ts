@@ -11,7 +11,9 @@ import {
     isInteractiveTerminal,
     type CliIo,
 } from "./cli-io.js";
-
+import type {
+    ModelSelection,
+} from "../application/model-resolver.js";
 /**
  * 创建cli所需要的所有外部依赖
  */
@@ -26,6 +28,8 @@ export interface CreateCliDependencies {
     readonly version: string;
 
     readonly initialCwd: string;
+
+    readonly defaultModelSelection: ModelSelection;
 }
 
 interface CliOptions {
@@ -33,6 +37,9 @@ interface CliOptions {
 
     readonly interactive: boolean;
 
+    readonly provider: string;
+
+    readonly model: string;
 }
 
 export function createCli(
@@ -63,6 +70,20 @@ export function createCli(
         .option(
             "--no-interactive",
             "disable interactive prompts and confirmations",
+        )
+        .option(
+            "--provider <provider>",
+            "model provider",
+            dependencies
+                .defaultModelSelection
+                .provider,
+        )
+        .option(
+            "-m, --model <model>",
+            "model id",
+            dependencies
+                .defaultModelSelection
+                .model,
         )
         .showHelpAfterError(
             "(run with --help for usage)",
@@ -115,8 +136,16 @@ export function createCli(
                             prompt,
                             cwd,
                             mode,
+                            model: {
+                                provider:
+                                options.provider,
+
+                                model:
+                                options.model,
+                            },
                             signal:
                             dependencies.signal,
+
                         },
                     );
 
@@ -171,9 +200,15 @@ function renderPreparedRun(
     io.writeOut(
         [
             "Agent session prepared.",
+
             `Workspace: ${result.cwd}`,
+
             `Mode: ${result.mode}`,
+
+            `Model: ${result.model.provider}/${result.model.id}`,
+
             `Task: ${task}`,
+
             "",
         ].join("\n"),
     );

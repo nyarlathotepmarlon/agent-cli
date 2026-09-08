@@ -19,6 +19,8 @@ import {
 import {
     runCli,
 } from "./cli/run-cli.js";
+import {ModelRegistry} from "./infrastructure/model/model-registry.js";
+import {OpenAIModelProvider} from "./infrastructure/model/openai/openai-model-provider.js";
 
 const controller =
     new AbortController();
@@ -50,7 +52,28 @@ process.on(
 try {
     const version =
         await readPackageVersion();
+    const modelRegistry =
+        new ModelRegistry([
+            new OpenAIModelProvider({
+                apiKey:
+                    readEnvironmentVariable(
+                        "OPENAI_API_KEY",
+                    ),
 
+                baseURL:
+                    readEnvironmentVariable(
+                        "OPENAI_BASE_URL",
+                    ),
+
+                timeoutMs:
+                    readPositiveInteger(
+                        process.env[
+                            "AGENT_MODEL_TIMEOUT_MS"
+                            ],
+                        120_000,
+                    ),
+            }),
+        ]);
     const application =
         new DefaultAgentApplication({
             maxTurns: 40,
@@ -58,7 +81,7 @@ try {
             maxToolCalls: 200,
 
             maxTotalTokens: null,
-        });
+        }, modelRegistry);
 
     const exitCode =
         await runCli(
@@ -72,7 +95,19 @@ try {
                 controller.signal,
 
                 version,
+                defaultModelSelection: {
+                    provider:
+                        readEnvironmentVariable(
+                            "AGENT_PROVIDER",
+                        ) ??
+                        "openai",
 
+                    model:
+                        readEnvironmentVariable(
+                            "AGENT_MODEL",
+                        ) ??
+                        "gpt-5.5",
+                },
                 initialCwd:
                     process.cwd(),
             },
@@ -97,4 +132,47 @@ try {
         "SIGINT",
         handleSigint,
     );
+}
+
+function readEnvironmentVariable(
+    name: string,
+): string | null {
+    const value =
+        process.env[name];
+
+    if (value === undefined) {
+        return null;
+    }
+
+    const trimmed =
+        value.trim();
+
+    return trimmed.length === 0
+        ? null
+        : trimmed;
+}
+
+function readPositiveInteger(
+    value: string | undefined,
+    fallback: number,
+): number {
+    if (value === undefined) {
+        return fallback;
+    }
+
+    const parsed =
+        Number(value);
+
+    if (
+        !Number.isSafeInteger(
+            parsed,
+        ) ||
+        parsed <= 0
+    ) {
+        throw new Error(
+            `Expected positive integer, received: ${value}`,
+        );
+    }
+
+    return parsed;
 }

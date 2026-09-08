@@ -4,6 +4,7 @@ export type ModelFinishReason =
     | "completed"
     | "tool_calls"
     | "max_output_tokens"
+    | "content_filter"
     | "refused"
     | "unknown";
 
@@ -18,4 +19,6 @@ export interface ModelResponse {
     readonly finishReason: ModelFinishReason;
 
     readonly usage: ModelUsage | null;
+    readonly providerRequestId:
+        string | null;
 }

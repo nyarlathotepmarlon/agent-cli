@@ -55,6 +55,7 @@ describe("agent transitions", () => {
                             },
                         },
                     ],
+                    providerData:null,
                 },
 
                 finishReason: "tool_calls",
@@ -63,6 +64,7 @@ describe("agent transitions", () => {
                     inputTokens: 100,
                     outputTokens: 20,
                 },
+                providerRequestId:null
             },
         );
 
@@ -104,6 +106,7 @@ describe("agent transitions", () => {
                             },
                         },
                     ],
+                    providerData:null
                 },
 
                 finishReason: "tool_calls",
@@ -112,6 +115,7 @@ describe("agent transitions", () => {
                     inputTokens: 100,
                     outputTokens: 20,
                 },
+                providerRequestId:null,
             });
 
         const afterTool =

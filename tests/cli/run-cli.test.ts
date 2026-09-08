@@ -88,7 +88,13 @@ function createApplication(
                 cwd: request.cwd,
 
                 mode: request.mode,
+                model: {
+                    provider:
+                    request.model.provider,
 
+                    id:
+                    request.model.model,
+                },
                 state:
                     createAgentState(
                         limits,
@@ -145,7 +151,10 @@ describe("runCli", () => {
                             ),
 
                         io: memory.io,
-
+                        defaultModelSelection: {
+                            provider: "openai",
+                            model: "gpt-5.5",
+                        },
                         signal:
                         controller.signal,
 
@@ -230,7 +239,10 @@ describe("runCli", () => {
                             ),
 
                         io: memory.io,
-
+                        defaultModelSelection: {
+                            provider: "openai",
+                            model: "gpt-5.5",
+                        },
                         signal:
                         controller.signal,
 
@@ -283,7 +295,10 @@ describe("runCli", () => {
                             createApplication(),
 
                         io: memory.io,
-
+                        defaultModelSelection: {
+                            provider: "openai",
+                            model: "gpt-5.5",
+                        },
                         signal:
                         controller.signal,
 
@@ -325,7 +340,10 @@ describe("runCli", () => {
                     {
                         application:
                             createApplication(),
-
+                        defaultModelSelection: {
+                            provider: "openai",
+                            model: "gpt-5.5",
+                        },
                         io: memory.io,
 
                         signal:
@@ -374,7 +392,10 @@ describe("runCli", () => {
                             createApplication(),
 
                         io: memory.io,
-
+                        defaultModelSelection: {
+                            provider: "openai",
+                            model: "gpt-5.5",
+                        },
                         signal:
                         controller.signal,
 
@@ -424,7 +445,10 @@ describe("runCli", () => {
 
                         signal:
                         controller.signal,
-
+                        defaultModelSelection: {
+                            provider: "openai",
+                            model: "gpt-5.5",
+                        },
                         version: "1.0.0",
 
                         initialCwd:
@@ -444,3 +468,82 @@ describe("runCli", () => {
         },
     );
 });
+it(
+    "passes provider and model selection",
+    async () => {
+        const memory =
+            createMemoryIo();
+
+        const controller =
+            new AbortController();
+
+        const captured: {
+            request:
+                AgentRunRequest | null;
+        } = {
+            request: null,
+        };
+
+        const exitCode =
+            await runCli(
+                [
+                    "node",
+                    "agent",
+
+                    "--provider",
+                    "openai",
+
+                    "--model",
+                    "gpt-5.5",
+
+                    "fix",
+                    "tests",
+                ],
+                {
+                    application:
+                        createApplication(
+                            (request) => {
+                                captured.request =
+                                    request;
+                            },
+                        ),
+
+                    io:
+                    memory.io,
+
+                    signal:
+                    controller.signal,
+
+                    version:
+                        "1.0.0",
+
+                    initialCwd:
+                        process.cwd(),
+
+                    defaultModelSelection: {
+                        provider:
+                            "openai",
+
+                        model:
+                            "default-model",
+                    },
+                },
+            );
+
+        expect(
+            exitCode,
+        ).toBe(
+            ExitCode.Success,
+        );
+
+        expect(
+            captured.request?.model,
+        ).toEqual({
+            provider:
+                "openai",
+
+            model:
+                "gpt-5.5",
+        });
+    },
+);

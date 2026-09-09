@@ -38,7 +38,7 @@ export class ModelError
         ModelErrorCode;
 
     public readonly provider: string;
-
+    //将错误分为暂时性错误以及永久性错误
     public readonly retryable: boolean;
 
     public readonly status:

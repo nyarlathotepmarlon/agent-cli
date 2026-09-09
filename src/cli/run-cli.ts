@@ -6,7 +6,9 @@ import {
     createCli,
     type CreateCliDependencies,
 } from "./create-cli.js";
-
+import {
+    CliExitSignal,
+} from "./cli-exit-signal.js";
 import {
     ExitCode,
     type ExitCode as ExitCodeValue,
@@ -31,6 +33,12 @@ export async function runCli(
 
         return ExitCode.Success;
     } catch (error) {
+        if (
+            error instanceof
+            CliExitSignal
+        ) {
+            return error.exitCode;
+        }
         // 错误来自用户输入
         if (
             error instanceof

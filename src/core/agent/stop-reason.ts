@@ -1,6 +1,15 @@
+import type {
+    ModelErrorCode,
+} from "../model/model-error.js";
+
+import type {
+    ModelFinishReason,
+} from "../model/model-response.js";
+
 export interface CompletedStopReason {
     readonly kind: "completed";
 }
+
 
 export type BudgetStopReason =
     | {
@@ -18,7 +27,25 @@ export type BudgetStopReason =
     readonly limit: number;
     readonly used: number;
 };
+export type ModelStopReason =
+    | {
+    readonly kind: "max_output_tokens";
+}
+    | {
+    readonly kind: "content_filter";
+}
+    | {
+    readonly kind: "model_refused";
+}
+    | {
+    readonly kind: "unknown_model_finish_reason";
 
+    readonly finishReason:
+        ModelFinishReason;
+};
+export type ControlledStopReason =
+    | BudgetStopReason
+    | ModelStopReason;
 export interface CancelledStopReason {
     readonly kind: "cancelled";
     readonly reason: string | null;
@@ -27,16 +54,37 @@ export interface CancelledStopReason {
 export type FailureStopReason =
     | {
     readonly kind: "model_error";
-    readonly message: string;
-    readonly retryable: boolean;
+
+    readonly code:
+        ModelErrorCode;
+
+    readonly provider:
+        string;
+
+    readonly message:
+        string;
+
+    readonly retryable:
+        boolean;
+
+    readonly status:
+        number | null;
+
+    readonly requestId:
+        string | null;
+
+    readonly attempts:
+        number;
 }
     | {
     readonly kind: "runtime_error";
+
     readonly message: string;
 };
 
+
 export type StopReason =
     | CompletedStopReason
-    | BudgetStopReason
+    | ControlledStopReason
     | CancelledStopReason
     | FailureStopReason;

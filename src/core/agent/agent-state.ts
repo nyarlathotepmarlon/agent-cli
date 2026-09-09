@@ -1,7 +1,7 @@
 import type { ModelMessage } from "../model/model-message.js";
 import type { AgentStep } from "./agent-step.js";
 import type {
-    BudgetStopReason,
+    ControlledStopReason,
     CancelledStopReason,
     CompletedStopReason,
     FailureStopReason,
@@ -37,7 +37,7 @@ export interface StoppedAgentState
     extends AgentStateBase {
     readonly status: "stopped";
 
-    readonly stopReason: BudgetStopReason;
+    readonly stopReason: ControlledStopReason;
 }
 
 export interface CancelledAgentState

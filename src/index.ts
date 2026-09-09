@@ -1,6 +1,21 @@
 #!/usr/bin/env node
 
 import {
+    DefaultAgentRuntime,
+} from "./core/agent/agent-runtime.js";
+
+import {
+    ExponentialBackoffModelRetryPolicy,
+} from "./core/agent/model-retry-policy.js";
+
+import {
+    NodeDelay,
+} from "./infrastructure/time/node-delay.js";
+
+import {
+    EmptyAgentToolRuntime,
+} from "./infrastructure/tools/empty-agent-tool-runtime.js";
+import {
     DefaultAgentApplication,
 } from "./application/agent-application.js";
 
@@ -74,14 +89,61 @@ try {
                     ),
             }),
         ]);
+    const retryPolicy =
+        new ExponentialBackoffModelRetryPolicy({
+            maxAttempts:
+                readPositiveInteger(
+                    process.env[
+                        "AGENT_MODEL_MAX_ATTEMPTS"
+                        ],
+                    3,
+                ),
+
+            baseDelayMs:
+                readPositiveInteger(
+                    process.env[
+                        "AGENT_MODEL_RETRY_BASE_MS"
+                        ],
+                    500,
+                ),
+
+            maxDelayMs:
+                readPositiveInteger(
+                    process.env[
+                        "AGENT_MODEL_RETRY_MAX_MS"
+                        ],
+                    5_000,
+                ),
+        });
+
+    const runtime =
+        new DefaultAgentRuntime(
+            retryPolicy,
+
+            new NodeDelay(),
+        );
+
+    const toolRuntime =
+        new EmptyAgentToolRuntime();
+
     const application =
         new DefaultAgentApplication({
-            maxTurns: 40,
+            limits: {
+                maxTurns: 40,
 
-            maxToolCalls: 200,
+                maxToolCalls: 200,
 
-            maxTotalTokens: null,
-        }, modelRegistry);
+                maxTotalTokens:
+                    null,
+            },
+
+            modelResolver:
+            modelRegistry,
+
+            runtime,
+
+            toolRuntime,
+        });
 
     const exitCode =
         await runCli(

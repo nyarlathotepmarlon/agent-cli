@@ -20,6 +20,7 @@ import {
 
 import type {
     BudgetStopReason,
+    ControlledStopReason,
     FailureStopReason,
 } from "./stop-reason.js";
 
@@ -179,7 +180,23 @@ export function stopAgentForBudget(
         stopReason: reason,
     };
 }
+/**
+ * 将running状态转为stop状态
+ * @param state running状态
+ * @param reason stop原因：包括BudgetStopReason以及ModelStopReason
+ */
+export function stopAgent(
+    state: RunningAgentState,
+    reason: ControlledStopReason,
+): StoppedAgentState {
+    return {
+        ...state,
 
+        status: "stopped",
+
+        stopReason: reason,
+    };
+}
 /**
  * 将running状态转为cancelled状态
  * @param state running状态

@@ -1,7 +1,10 @@
 import {
     resolve,
 } from "node:path";
-
+import {
+    completeAgent,
+    startAgent,
+} from "../../src/core/agent/agent-transition.js";
 import {
     describe,
     expect,
@@ -75,30 +78,51 @@ function createApplication(
         async run(
             request: AgentRunRequest,
         ) {
-            onRun?.(request);
+            onRun?.(
+                request,
+            );
 
             request.signal
                 .throwIfAborted();
 
+            const state =
+                completeAgent(
+                    startAgent(
+                        createAgentState(
+                            limits,
+                        ),
+                    ),
+                );
+
             return {
-                status: "prepared" as const,
+                status:
+                    "completed" as const,
 
-                prompt: request.prompt,
+                prompt:
+                request.prompt,
 
-                cwd: request.cwd,
+                cwd:
+                request.cwd,
 
-                mode: request.mode,
+                mode:
+                request.mode,
+
                 model: {
                     provider:
-                    request.model.provider,
+                    request
+                        .model
+                        .provider,
 
                     id:
-                    request.model.model,
+                    request
+                        .model
+                        .model,
                 },
-                state:
-                    createAgentState(
-                        limits,
-                    ),
+
+                state,
+
+                output:
+                    "done",
             };
         },
     };

@@ -14,6 +14,15 @@ import {
 import type {
     ModelSelection,
 } from "../application/model-resolver.js";
+
+import {
+    CliExitSignal,
+} from "./cli-exit-signal.js";
+
+import {
+    ExitCode,
+    type ExitCode as ExitCodeValue,
+} from "./exit-code.js";
 /**
  * 创建cli所需要的所有外部依赖
  */
@@ -148,11 +157,21 @@ export function createCli(
 
                         },
                     );
+                // 将Agent运行结果转为退出码
+                const exitCode =
+                    renderAgentRunResult(
+                        result,
+                        dependencies.io,
+                    );
 
-                renderPreparedRun(
-                    result,
-                    dependencies.io,
-                );
+                if (
+                    exitCode !==
+                    ExitCode.Success
+                ) {
+                    throw new CliExitSignal(
+                        exitCode,
+                    );
+                }
             },
         );
 
@@ -183,33 +202,127 @@ function normalizePrompt(
         : prompt;
 }
 
-/**
- * 渲染Application Layer返回的结果
- * @param result Application Layer返回的结果
- * @param io 实际环境的io
- */
-function renderPreparedRun(
+
+
+function renderAgentRunResult(
     result: AgentRunResult,
     io: CliIo,
+): ExitCodeValue {
+    // 根据agent运行结果的状态向io流写入对应的内容
+    switch (result.status) {
+        case "awaiting_input":
+            io.writeOut(
+                [
+                    "Agent is ready.",
+
+                    `Workspace: ${result.cwd}`,
+
+                    `Model: ${result.model.provider}/${result.model.id}`,
+
+                    "Interactive REPL will be added in a later phase; provide a task as an argument for now.",
+
+                    "",
+                ].join("\n"),
+            );
+
+            return ExitCode.Success;
+
+        case "completed":
+            writeAssistantOutput(
+                result.output,
+                io,
+            );
+
+            return ExitCode.Success;
+
+        case "stopped":
+            if (
+                result.output !== null &&
+                result.output.length > 0
+            ) {
+                writeAssistantOutput(
+                    result.output,
+                    io,
+                );
+            }
+
+            io.writeErr(
+                `agent: stopped: ${formatStopReason(
+                    result.state
+                        .stopReason,
+                )}\n`,
+            );
+
+            return ExitCode.Failure;
+
+        case "cancelled":
+            io.writeErr(
+                "agent: interrupted\n",
+            );
+
+            return ExitCode.Interrupted;
+
+        case "failed":
+            if (
+                result.output !== null &&
+                result.output.length > 0
+            ) {
+                writeAssistantOutput(
+                    result.output,
+                    io,
+                );
+            }
+
+            io.writeErr(
+                `agent: failed: ${result.state.stopReason.message}\n`,
+            );
+
+            return ExitCode.Failure;
+    }
+}
+
+function writeAssistantOutput(
+    output: string,
+    io: CliIo,
 ): void {
-    const task =
-        result.prompt === null
-            ? "<interactive input>"
-            : result.prompt;
+    if (output.endsWith("\n")) {
+        io.writeOut(
+            output,
+        );
+
+        return;
+    }
 
     io.writeOut(
-        [
-            "Agent session prepared.",
-
-            `Workspace: ${result.cwd}`,
-
-            `Mode: ${result.mode}`,
-
-            `Model: ${result.model.provider}/${result.model.id}`,
-
-            `Task: ${task}`,
-
-            "",
-        ].join("\n"),
+        `${output}\n`,
     );
+}
+
+function formatStopReason(
+    reason:
+    import("../core/agent/stop-reason.js")
+        .ControlledStopReason,
+): string {
+    switch (reason.kind) {
+        case "max_turns":
+            return `maximum model turns reached (${reason.used}/${reason.limit})`;
+
+        case "max_tool_calls":
+            return `maximum tool calls reached (${reason.used}/${reason.limit})`;
+
+        case "max_total_tokens":
+            return `token budget reached (${reason.used}/${reason.limit})`;
+
+        case "max_output_tokens":
+            return "model reached its output token limit";
+
+        case "content_filter":
+            return "model output was stopped by a content filter";
+
+        case "model_refused":
+            return "model refused the request";
+
+        case "unknown_model_finish_reason":
+            return `unknown model finish reason: ${reason.finishReason}`;
+    }
 }

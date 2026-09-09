@@ -8,8 +8,8 @@ export interface ModelRequest {
 }
 
 export interface Model {
-    readonly provider: string;
-    readonly id:string;
+    readonly provider: string; // 供应商名称
+    readonly id:string;// 模型名称
     generate(
         request: ModelRequest,
         signal: AbortSignal,

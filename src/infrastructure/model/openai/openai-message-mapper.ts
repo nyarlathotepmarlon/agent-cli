@@ -168,10 +168,7 @@ export function toOpenAITools(
             parameters:
             tool.inputSchema,
 
-            /*
-             * Phase 5 再建立 strict-compatible
-             * schema validator。
-             */
+            // 本地工具框架负责参数校验；模型服务的 strict 配置独立处理。
             strict: false,
         }),
     );

@@ -13,8 +13,16 @@ import {
 } from "./infrastructure/time/node-delay.js";
 
 import {
-    EmptyAgentToolRuntime,
-} from "./infrastructure/tools/empty-agent-tool-runtime.js";
+    DefaultAgentToolRuntime,
+} from "./core/tools/default-agent-tool-runtime.js";
+
+import {
+    ToolRegistry,
+} from "./core/tools/tool-registry.js";
+
+import {
+    addIntegersTool,
+} from "./infrastructure/tools/add-integers-tool.js";
 import {
     DefaultAgentApplication,
 } from "./application/agent-application.js";
@@ -122,9 +130,11 @@ try {
 
             new NodeDelay(),
         );
-
+    const toolRegistry = new ToolRegistry([
+        addIntegersTool,
+    ]);
     const toolRuntime =
-        new EmptyAgentToolRuntime();
+        new DefaultAgentToolRuntime(toolRegistry);
 
     const application =
         new DefaultAgentApplication({

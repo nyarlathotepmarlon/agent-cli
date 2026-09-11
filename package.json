@@ -28,6 +28,7 @@
   "private": true,
   "dependencies": {
     "commander": "^15.0.0",
-    "openai": "^7.10.0"
+    "openai": "^7.10.0",
+    "zod": "^4.6.1"
   }
 }

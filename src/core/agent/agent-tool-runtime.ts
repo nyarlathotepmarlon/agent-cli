@@ -16,10 +16,10 @@ import type {
 
 export interface AgentToolRuntime {
     readonly definitions:
-        readonly ModelToolDefinition[];
+        readonly ModelToolDefinition[]; // 向模型提供实际注册的工具
 
     execute(
         call: ToolCall,
         context: ToolExecutionContext,
-    ): Promise<ToolResult>;
+    ): Promise<ToolResult>; // 查找并调用对应的工具
 }

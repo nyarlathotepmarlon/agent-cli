@@ -12,17 +12,7 @@ import {
     NodeDelay,
 } from "./infrastructure/time/node-delay.js";
 
-import {
-    DefaultAgentToolRuntime,
-} from "./core/tools/default-agent-tool-runtime.js";
-
-import {
-    ToolRegistry,
-} from "./core/tools/tool-registry.js";
-
-import {
-    addIntegersTool,
-} from "./infrastructure/tools/add-integers-tool.js";
+import {createWorkspaceToolRuntime} from "./infrastructure/tools/create-workspace-tool-runtime.js";
 import {
     DefaultAgentApplication,
 } from "./application/agent-application.js";
@@ -130,11 +120,7 @@ try {
 
             new NodeDelay(),
         );
-    const toolRegistry = new ToolRegistry([
-        addIntegersTool,
-    ]);
-    const toolRuntime =
-        new DefaultAgentToolRuntime(toolRegistry);
+
 
     const application =
         new DefaultAgentApplication({
@@ -152,7 +138,7 @@ try {
 
             runtime,
 
-            toolRuntime,
+            createToolRuntime:createWorkspaceToolRuntime,
         });
 
     const exitCode =

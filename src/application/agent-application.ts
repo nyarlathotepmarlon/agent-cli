@@ -155,8 +155,10 @@ export interface DefaultAgentApplicationOptions {
     readonly runtime:
         AgentRuntime;
 
-    readonly toolRuntime:
-        AgentToolRuntime;
+    readonly createToolRuntime:(
+        cwd:string,
+        signal:AbortSignal,
+    )=>Promise<AgentToolRuntime>
 
     readonly systemInstructions?:
         string;
@@ -232,6 +234,10 @@ export class DefaultAgentApplication
                     null,
             };
         }
+        const toolRuntime=await this.options.createToolRuntime(
+            request.cwd, // 这是解析过后的工作区
+            request.signal
+        )
         // 解析实际模型
         const model =
             this.options
@@ -282,8 +288,7 @@ export class DefaultAgentApplication
                         model,
 
                         toolRuntime:
-                        this.options
-                            .toolRuntime,
+                        toolRuntime,
 
                         signal:
                         request.signal,

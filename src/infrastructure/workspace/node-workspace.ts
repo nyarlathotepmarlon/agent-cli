@@ -11,13 +11,33 @@ import {
     WorkspaceError,
     type WorkspaceErrorCode,
 } from "../../core/workspace/workspace-error.js";
+import type {
+    SearchWorkspace,
+    WorkspaceGlobRequest,
+    WorkspaceGlobResult,
+    WorkspaceTextMatch,
+    WorkspaceTextSearchRequest,
+    WorkspaceTextSearchResult,
+} from "../../core/workspace/workspace-search.js";
 
+import {
+    runRipgrepDelimited,
+    type RipgrepRunResult,
+} from "./ripgrep-runner.js";
+import {
+    matchesWorkspaceGlob,
+} from "./workspace-glob-matcher.js";
 // 单文件读取上限256 KB
 export const MAX_FILE_BYTES = 256 * 1024;
 // 单次列目录上限200项目
 export const MAX_DIRECTORY_ENTRIES = 200;
-
-export class NodeWorkspace implements Workspace {
+// 限制一次搜索最多返回1000条结果
+export const MAX_SEARCH_RESULTS =
+    1_000;
+// 限制一次搜索结果最多返回1200字符
+export const MAX_SEARCH_LINE_CHARS =
+    1_200;
+export class NodeWorkspace implements Workspace,SearchWorkspace {
     // 构造方法声明为私有
     private constructor(public readonly root: string) {}
     // 工厂方法：产生一个NodeWorkSpace
@@ -293,6 +313,348 @@ export class NodeWorkspace implements Workspace {
             .split(path.sep)
             .join("/") || ".";
     }
+
+    public async globFiles(
+        request: WorkspaceGlobRequest,
+        signal: AbortSignal,
+    ): Promise<WorkspaceGlobResult> {
+        return withFsErrors(
+            signal,
+            async () => {
+                // 校验
+                validateSearchLimit(
+                    request.maxResults,
+                );
+                // 规划化glob pattern
+                const pattern =
+                    normalizeGlobPattern(
+                        request.pattern,
+                    );
+                // 解析真实的路径
+                const target =
+                    await this
+                        .resolveExistingPath(
+                            request.basePath,
+                        );
+                // 对应路径不是目录，直接抛错
+                if (
+                    !(
+                        await stat(
+                            target,
+                        )
+                    ).isDirectory()
+                ) {
+                    throw new WorkspaceError(
+                        "not_directory",
+                        "Search base path must be a directory",
+                    );
+                }
+                // 获得相对于workspace的相对路径
+                const basePath =
+                    this.relativePath(
+                        target,
+                    );
+                // 文件结果集合
+                const paths:
+                    string[] = [];
+
+                let sawAdditionalMatch =
+                    false;
+
+                const result =
+                    await runSearch(
+                        {
+                            cwd:
+                            this.root,
+
+                            args: [
+                                // --glob pattern将pattern绑定到ripgrep的glob方言
+                                "--files",// 文件遍历，ripgrep只复制高速遍历文件，而pattern语义由node自己控制
+
+                                "--hidden",// 搜索隐藏文件
+
+                                ...ripgrepDirectoryExcludes(),
+
+                                "--sort",
+                                "path", // 按路径排序
+
+                                "--null",// 文件路径之间通过\0分割，因为合法文件名中经可能存在换行符，所以不使用换行符作为分割
+
+                                "--",
+
+                                basePath,
+                            ],
+
+                            delimiter:
+                                "\0",
+
+                            signal,
+
+                            onRecord:
+                                (
+                                    record,
+                                ) => {
+                                    // 规范化路径
+                                    const workspacePath =
+                                        normalizeSearchPath(
+                                            record,
+                                        );
+                                    //
+                                    const candidate =
+                                        relativeToBase(
+                                            workspacePath,
+                                            basePath,
+                                        );
+                                    // 是否匹配
+                                    let matched:
+                                        boolean;
+
+                                    try {
+                                        //判断候选文件是否符合pattern,
+                                        matched =
+                                            matchesWorkspaceGlob(
+                                                candidate,
+                                                pattern,
+                                            );
+                                    } catch (
+                                        error
+                                        ) {
+                                        throw new WorkspaceError(
+                                            "invalid_pattern",
+                                            getErrorMessage(
+                                                error,
+                                            ),
+                                        );
+                                    }
+
+                                    if (
+                                        !matched
+                                    ) {
+                                        return true;
+                                    }
+
+                                    if (
+                                        paths.length <
+                                        request.maxResults
+                                    ) {
+                                        paths.push(
+                                            workspacePath,
+                                        );
+
+                                        return true;
+                                    }
+                                    //确认至少还有一条结果，但不需要继续搜索了
+                                    sawAdditionalMatch =
+                                        true;
+
+                                    return false;
+                                },
+                        },
+                        signal,
+                    );
+
+                assertSearchExit(
+                    result,
+                    "glob",
+                    false,
+                );
+
+                return {
+                    basePath,
+
+                    pattern,
+
+                    paths,
+
+                    truncated:
+                        sawAdditionalMatch ||
+                        result
+                            .terminatedEarly,
+                };
+            },
+        );
+    }
+    public async searchText(
+        request:
+        WorkspaceTextSearchRequest,
+        signal: AbortSignal,
+    ): Promise<WorkspaceTextSearchResult> {
+        return withFsErrors(
+            signal,
+            async () => {
+                // 限制搜索长度
+                validateSearchLimit(
+                    request.maxResults,
+                );
+                // 限制query的长度
+                if (
+                    request.query.length ===
+                    0 ||
+                    request.query.length >
+                    4_096
+                ) {
+                    throw new WorkspaceError(
+                        "invalid_pattern",
+                        "Search query must contain between 1 and 4096 characters",
+                    );
+                }
+                // 解析真实路径
+                const target =
+                    await this
+                        .resolveExistingPath(
+                            request.basePath,
+                        );
+                // 判断真实路径是不是目录
+                if (
+                    !(
+                        await stat(
+                            target,
+                        )
+                    ).isDirectory()
+                ) {
+                    throw new WorkspaceError(
+                        "not_directory",
+                        "Search base path must be a directory",
+                    );
+                }
+                // 获得到worksapce的相对路径
+                const basePath =
+                    this.relativePath(
+                        target,
+                    );
+
+                const matches:
+                    WorkspaceTextMatch[] =
+                    [];
+
+                let sawAdditionalMatch =
+                    false;
+
+                const args:
+                    string[] =
+                    [
+                        "--json",// 转为json结构化
+
+                        "--hidden",// 查询隐藏文件
+
+                        ...ripgrepDirectoryExcludes(),// 排除的目录
+
+                        "--sort",// 根据路径排序
+                        "path",
+
+                        "--max-columns",// 某个 minified JS 一行 500 KB
+                        String(
+                            MAX_SEARCH_LINE_CHARS,
+                        ),
+
+                        "--max-columns-preview",
+
+                        "--max-filesize",// 不搜索大于MAX_FILE_BYTE的文件
+                        String(
+                            MAX_FILE_BYTES,
+                        ),
+
+                        request.caseSensitive
+                            ? "--case-sensitive"
+                            : "--ignore-case",
+                    ];
+                // 如果模式的literal
+                if (
+                    request.mode ===
+                    "literal"
+                ) {
+                    args.push(
+                        "--fixed-strings",
+                    );
+                }
+                // 防止shell注入，将request.query只理解为搜索字符串
+                args.push(
+                    "--",
+                    request.query,
+                    basePath,
+                );
+
+                const result =
+                    await runSearch(
+                        {
+                            cwd:
+                            this.root,
+
+                            args,
+
+                            delimiter:
+                                "\n",
+
+                            signal,
+
+                            onRecord:
+                                (
+                                    record,
+                                ) => {
+                                    const match =
+                                        parseRipgrepMatch(
+                                            record,
+                                        );
+
+                                    if (
+                                        match ===
+                                        null
+                                    ) {
+                                        return true;
+                                    }
+                                    //如果matches的长度合法，直接放入matches数组
+                                    if (
+                                        matches.length <
+                                        request.maxResults
+                                    ) {
+                                        matches.push(
+                                            match,
+                                        );
+
+                                        return true;
+                                    }
+
+                                    sawAdditionalMatch =
+                                        true;
+
+                                    return false;
+                                },
+                        },
+                        signal,
+                    );
+
+                assertSearchExit(
+                    result,
+
+                    "grep",
+
+                    request.mode ===
+                    "regex",
+                );
+
+                return {
+                    basePath,
+
+                    query:
+                    request.query,
+
+                    mode:
+                    request.mode,
+
+                    caseSensitive:
+                    request
+                        .caseSensitive,
+
+                    matches,
+
+                    truncated:
+                        sawAdditionalMatch ||
+                        result
+                            .terminatedEarly,
+                };
+            },
+        );
+    }
 }
 
 function fileTooLarge(): WorkspaceError {
@@ -363,4 +725,376 @@ async function withFsErrors<T>(
             `Filesystem operation failed: ${code}`,
         );
     }
+
+}
+
+/**
+ * 将用户输入的glob转为一个受控、安全、平台无关的相对glob
+ * @param input
+ */
+function normalizeGlobPattern(
+    input: string,
+): string {
+    const pattern =
+        // 去除两端空格，且将格式同一为POSIX风格的/
+        input
+            .trim()
+            .replaceAll(
+                "\\",
+                "/",
+            );
+    // 禁止以下的glob
+    if (
+        pattern.length === 0 || // 防止空pattern
+        pattern.length > 4096 || // 防止超长pattern
+        pattern.startsWith( //禁止绝对路径
+            "/",
+        ) ||
+        /^[a-z]:/iu.test(// 禁止 Windows drive path
+            pattern,
+        ) ||
+        pattern.startsWith(// 只接受正向匹配
+            "!",
+        ) ||
+        /[\u0000-\u001f]/u.test(
+            pattern,
+        )
+    ) {
+        throw new WorkspaceError(
+            "invalid_pattern",
+            "Glob must be a relative positive pattern",
+        );
+    }
+
+    const segments =
+        pattern.split("/");
+
+    if (
+        segments.includes("..")
+    ) {
+        throw new WorkspaceError(
+            "invalid_pattern",
+            "Glob cannot contain parent traversal",
+        );
+    }
+
+    return pattern;
+}
+
+/**
+ * 将ripgrep的一行JSON输出转换为内部的WorkspaceTextMatch
+ * @param record
+ */
+function parseRipgrepMatch(
+    record: string,
+): WorkspaceTextMatch | null {
+    let value:
+        unknown;
+
+    try {
+        value =
+            JSON.parse(
+                record,
+            );
+    } catch {
+        throw new WorkspaceError(
+            "search_failed",
+            "Search backend returned invalid JSON",
+        );
+    }
+
+    if (
+        typeof value !==
+        "object" ||
+        value === null ||
+        !("type" in value) ||
+        value.type !== "match" ||
+        !("data" in value)
+    ) {
+        return null;
+    }
+
+    const data =
+        value.data;
+
+    if (
+        typeof data !==
+        "object" ||
+        data === null ||
+        !("path" in data) ||
+        !("lines" in data) ||
+        !("line_number" in data)
+    ) {
+        return null;
+    }
+
+    const sourcePath =
+        decodeRipgrepText(
+            data.path,
+        );
+
+    const lineText =
+        decodeRipgrepText(
+            data.lines,
+        );
+
+    const lineNumber =
+        data.line_number;
+
+    if (
+        sourcePath === null ||
+        lineText === null ||
+        typeof lineNumber !==
+        "number"
+    ) {
+        return null;
+    }
+
+    const normalizedLine =
+        lineText.replace(
+            /\r?\n$/u,
+            "",
+        );
+
+    const truncated =
+        normalizedLine.length >
+        MAX_SEARCH_LINE_CHARS;
+
+    return {
+        path:
+            normalizeSearchPath(
+                sourcePath,
+            ),
+
+        line:
+        lineNumber,
+
+        text:
+            truncated
+                ? normalizedLine
+                    .slice(
+                        0,
+                        MAX_SEARCH_LINE_CHARS,
+                    )
+                : normalizedLine,
+
+        textTruncated:
+        truncated,
+    };
+}
+
+function decodeRipgrepText(
+    value: unknown,
+): string | null {
+    if (
+        typeof value !==
+        "object" ||
+        value === null
+    ) {
+        return null;
+    }
+
+    if (
+        "text" in value &&
+        typeof value.text ===
+        "string"
+    ) {
+        return value.text;
+    }
+
+    if (
+        "bytes" in value &&
+        typeof value.bytes ===
+        "string"
+    ) {
+        return Buffer
+            .from(
+                value.bytes,
+                "base64",
+            )
+            .toString(
+                "utf8",
+            );
+    }
+
+    return null;
+}
+
+/**
+ * 返回要排除的文件
+ */
+function ripgrepDirectoryExcludes():
+    string[] {
+    return [
+        "--glob",
+        "!.git/",
+
+        "--glob",
+        "!**/.git/",
+
+        "--glob",
+        "!node_modules/",
+
+        "--glob",
+        "!**/node_modules/",
+    ];
+}
+
+/**
+ * 规范化搜索路径：
+ * 1. 将路径风格转为POSIX风格
+ * 2. 去除多余的./
+ * @param input
+ */
+function normalizeSearchPath(
+    input: string,
+): string {
+    return input
+        .replaceAll(
+            "\\",
+            "/",
+        )
+        .replace(
+            /^\.\//u,
+            "",
+        );
+}
+
+function relativeToBase(
+    workspacePath: string,
+    basePath: string,
+): string {
+    if (
+        basePath === "."
+    ) {
+        return workspacePath;
+    }
+
+    if (
+        workspacePath ===
+        basePath
+    ) {
+        return ".";
+    }
+
+    const prefix =
+        `${basePath}/`;
+
+    if (
+        !workspacePath.startsWith(
+            prefix,
+        )
+    ) {
+        throw new WorkspaceError(
+            "search_failed",
+            "Search backend returned a path outside the requested base",
+        );
+    }
+
+    return workspacePath.slice(
+        prefix.length,
+    );
+}
+
+/**
+ * 限制value是一个整数，而且数值在(0,MAX_SEARCH_RESULTS]
+ * @param value
+ */
+function validateSearchLimit(
+    value: number,
+): void {
+    if (
+        !Number.isSafeInteger(
+            value,
+        ) ||
+        value <= 0 ||
+        value >
+        MAX_SEARCH_RESULTS
+    ) {
+        throw new WorkspaceError(
+            "invalid_range",
+            `Search result limit must be between 1 and ${MAX_SEARCH_RESULTS}`,
+        );
+    }
+}
+function assertSearchExit(
+    result: RipgrepRunResult,
+    operation: string,
+    regexSearch: boolean,
+): void {
+    if (
+        result.terminatedEarly
+    ) {
+        return;
+    }
+
+    if (
+        result.exitCode === 0 ||
+        result.exitCode === 1
+    ) {
+        return;
+    }
+
+    const message =
+        result.stderr
+            .trim()
+            .slice(
+                0,
+                2_000,
+            );
+
+    const looksLikeRegexError =
+        regexSearch &&
+        /regex|pattern parse|PCRE/iu.test(
+            message,
+        );
+
+    throw new WorkspaceError(
+        looksLikeRegexError
+            ? "invalid_pattern"
+            : "search_failed",
+
+        message.length === 0
+            ? `${operation} search failed`
+            : message,
+    );
+}
+async function runSearch(
+    options:
+    Parameters<
+        typeof runRipgrepDelimited
+    >[0],
+
+    signal: AbortSignal,
+): Promise<RipgrepRunResult> {
+    try {
+        return await
+            runRipgrepDelimited(
+                options,
+            );
+    } catch (error) {
+        signal.throwIfAborted();
+
+        if (
+            error instanceof
+            WorkspaceError
+        ) {
+            throw error;
+        }
+
+        throw new WorkspaceError(
+            "search_failed",
+            `Search backend failed: ${getErrorMessage(
+                error,
+            )}`,
+        );
+    }
+}
+
+function getErrorMessage(
+    error: unknown,
+): string {
+    return error instanceof Error
+        ? error.message
+        : String(error);
 }

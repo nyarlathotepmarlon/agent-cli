@@ -27,7 +27,9 @@
   },
   "private": true,
   "dependencies": {
+    "@vscode/ripgrep": "^1.18.0",
     "commander": "^15.0.0",
+    "minimatch": "^10.2.6",
     "openai": "^7.10.0",
     "zod": "^4.6.1"
   }

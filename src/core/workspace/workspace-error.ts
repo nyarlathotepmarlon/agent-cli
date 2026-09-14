@@ -2,6 +2,7 @@ export type WorkspaceErrorCode =
     | "invalid_path"
     | "outside_workspace"
     | "invalid_range"
+    | "invalid_pattern"
     | "text_too_large"
     | "not_found"
     | "not_file"
@@ -10,6 +11,7 @@ export type WorkspaceErrorCode =
     | "file_too_large"
     | "invalid_encoding"
     | "binary_file"
+    | "search_failed"
     | "io_error";
 
 export class WorkspaceError extends Error {

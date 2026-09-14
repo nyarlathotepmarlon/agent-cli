@@ -7,20 +7,54 @@ import {
 } from "../../core/workspace/workspace-error.js";
 // 错误映射表
 
-const toolErrorCodes: Record<WorkspaceErrorCode, ToolErrorCode> = {
-    invalid_path: "invalid_input",
-    invalid_range: "invalid_input",
-    text_too_large: "unavailable",
-    outside_workspace: "permission_denied",
-    not_found: "not_found",
-    not_file: "invalid_input",
-    not_directory: "invalid_input",
-    permission_denied: "permission_denied",
-    file_too_large: "unavailable",
-    invalid_encoding: "unavailable",
-    binary_file: "unavailable",
-    io_error: "execution_failed",
-};
+const toolErrorCodes:
+    Record<
+        WorkspaceErrorCode,
+        ToolErrorCode
+    > =
+    {
+        invalid_path:
+            "invalid_input",
+
+        invalid_range:
+            "invalid_input",
+
+        invalid_pattern:
+            "invalid_input",
+
+        text_too_large:
+            "unavailable",
+
+        outside_workspace:
+            "permission_denied",
+
+        not_found:
+            "not_found",
+
+        not_file:
+            "invalid_input",
+
+        not_directory:
+            "invalid_input",
+
+        permission_denied:
+            "permission_denied",
+
+        file_too_large:
+            "unavailable",
+
+        invalid_encoding:
+            "unavailable",
+
+        binary_file:
+            "unavailable",
+
+        search_failed:
+            "execution_failed",
+
+        io_error:
+            "execution_failed",
+    };
 
 export async function workspaceToolResult<T extends JsonValue>(
     signal: AbortSignal,

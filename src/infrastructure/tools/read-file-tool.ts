@@ -15,6 +15,7 @@ export function createReadFileTool(workspace: Workspace) {
         name: "read_file",
         description:
             "Read UTF-8 text using a workspace-relative path. " +
+            "The returned revision identifies the complete file version and must be passed to edit_file. " +
             "Lines are 1-based. Returns at most 200 lines and 20000 UTF-16 code units. " +
             "Use nextLine to continue; files over 256 KiB are unavailable.",
 
@@ -109,6 +110,7 @@ export function createReadFileTool(workspace: Workspace) {
                     content: selected.join("\n"),// 本页内容
                     truncated: hasMore,// 是否还有更多内容
                     nextLine: hasMore ? endLine + 1 : null,// 下一行的行号
+                    revision:file.revision
                 };
             });
         },

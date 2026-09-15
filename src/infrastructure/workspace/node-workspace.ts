@@ -1,4 +1,11 @@
-import { open, opendir, realpath, stat } from "node:fs/promises";
+import {
+    open,
+    opendir,
+    realpath,
+    rename,
+    stat,
+    unlink,
+} from "node:fs/promises";
 import * as path from "node:path";
 import { TextDecoder } from "node:util";
 import type {
@@ -27,6 +34,22 @@ import {
 import {
     matchesWorkspaceGlob,
 } from "./workspace-glob-matcher.js";
+import {
+    createHash,
+    randomUUID,
+} from "node:crypto";
+
+import type {
+    EditableWorkspace,
+    WorkspaceCreateTextFileRequest,
+    WorkspaceCreateTextFileResult,
+    WorkspaceReplaceTextRequest,
+    WorkspaceReplaceTextResult,
+} from "../../core/workspace/workspace-edit.js";
+
+import {
+    applyExactTextEdit,
+} from "../../core/edit/exact-text-edit.js";
 // 单文件读取上限256 KB
 export const MAX_FILE_BYTES = 256 * 1024;
 // 单次列目录上限200项目
@@ -37,7 +60,27 @@ export const MAX_SEARCH_RESULTS =
 // 限制一次搜索结果最多返回1200字符
 export const MAX_SEARCH_LINE_CHARS =
     1_200;
-export class NodeWorkspace implements Workspace,SearchWorkspace {
+
+interface NodeTextDocument {
+    readonly content: string;
+
+    readonly bytes:
+        Buffer;
+
+    readonly byteLength:
+        number;
+
+    readonly revision:
+        string;
+
+    readonly hasUtf8Bom:
+        boolean;
+
+    readonly mode:
+        number;
+}
+
+export class NodeWorkspace implements Workspace,SearchWorkspace,EditableWorkspace {
     // 构造方法声明为私有
     private constructor(public readonly root: string) {}
     // 工厂方法：产生一个NodeWorkSpace
@@ -58,7 +101,298 @@ export class NodeWorkspace implements Workspace,SearchWorkspace {
             return new NodeWorkspace(canonicalRoot);
         });
     }
+    private async resolveCreatableFilePath(
+        input: string,
+    ): Promise<string> {
+        // 返回合法的路径segments
+        const segments =
+            this.validatePathSegments(
+                input,
+            );
+        // 解析路径
+        const candidate =
+            path.resolve(
+                this.root,
+                ...segments,
+            );
+        // 确保路径在workspace中
+        this.assertInside(
+            candidate,
+        );
 
+        if (
+            candidate ===
+            this.root
+        ) {
+            throw new WorkspaceError(
+                "invalid_path",
+                "File path cannot refer to the workspace root",
+            );
+        }
+        // 获取父目录
+        const parentCandidate =
+            path.dirname(
+                candidate,
+            );
+        // 解析父目录的真实路径
+        const parent =
+            await realpath(
+                parentCandidate,
+            );
+        // 校验父目录是否在workspace内
+        this.assertInside(
+            parent,
+        );
+        // 判断父目录是否真的是一个目录
+        if (
+            !(
+                await stat(
+                    parent,
+                )
+            ).isDirectory()
+        ) {
+            throw new WorkspaceError(
+                "not_directory",
+                "Parent path must be a directory",
+            );
+        }
+        // 返回创建路径
+        return path.join(
+            parent,
+
+            path.basename(
+                candidate,
+            ),
+        );
+    }
+    private async readTextDocument(
+        target: string,
+        signal: AbortSignal,
+    ): Promise<NodeTextDocument> {
+        signal.throwIfAborted();
+
+        // 以只读方式打开文件。
+        const handle =
+            await open(
+                target,
+                "r",
+            );
+
+        try {
+            // 对“真正已经打开的文件对象”再次读取元数据，
+            // 确保最终打开的是普通文件。
+            // 这样可以避免仅依赖 open 之前的路径检查所产生的 TOCTOU 问题。
+            const metadata =
+                await handle.stat();
+
+            // 只允许读取普通文件。
+            if (
+                !metadata.isFile()
+            ) {
+                throw new WorkspaceError(
+                    "not_file",
+                    "Path must be a regular file",
+                );
+            }
+
+            // 如果 stat 时文件已经超过允许的最大大小，
+            // 直接拒绝读取，避免不必要的内存分配和 I/O。
+            if (
+                metadata.size >
+                MAX_FILE_BYTES
+            ) {
+                throw fileTooLarge();
+            }
+
+            // 多分配 1 个字节。
+            //
+            // 这样即使文件在 stat 之后继续增长，
+            // 也可以通过实际读取到 MAX_FILE_BYTES + 1 个字节
+            // 判断文件已经超过大小限制。
+            const buffer =
+                Buffer.alloc(
+                    MAX_FILE_BYTES +
+                    1,
+                );
+
+            let length = 0;
+
+            while (
+                length <
+                buffer.length
+                ) {
+                signal
+                    .throwIfAborted();
+
+                const {
+                    bytesRead,
+                } =
+                    await handle.read(
+                        buffer,
+
+                        length,
+
+                        // 每次最多读取 64 KiB。
+                        // 如果 buffer 剩余空间不足 64 KiB，
+                        // 就只读取剩余空间大小。
+                        Math.min(
+                            64 * 1024,
+                            buffer.length -
+                            length,
+                        ),
+
+                        length,
+                    );
+
+                // bytesRead === 0 表示已经到达 EOF。
+                if (
+                    bytesRead === 0
+                ) {
+                    break;
+                }
+
+                length +=
+                    bytesRead;
+            }
+
+            signal
+                .throwIfAborted();
+
+            // 实际读取完成后再次检查大小。
+            //
+            // 这一步用于处理文件在 stat 之后继续增长的情况。
+            // 因为 buffer 比限制多 1 字节，所以只要读到超过上限，
+            // 就能够可靠检测出来。
+            if (
+                length >
+                MAX_FILE_BYTES
+            ) {
+                throw fileTooLarge();
+            }
+
+            // 截取真正读取到的有效字节，并复制成一个独立 Buffer。
+            //
+            // Buffer.subarray() 本身只是原始大 Buffer 的视图，
+            // Buffer.from() 会创建独立副本，避免返回的 bytes
+            // 长期引用 MAX_FILE_BYTES + 1 大小的底层缓冲区。
+            const bytes =
+                Buffer.from(
+                    buffer.subarray(
+                        0,
+                        length,
+                    ),
+                );
+
+            // NUL 字节检测。
+            //
+            // 普通 UTF-8 文本通常不会包含 \0，
+            // 而很多二进制文件中会出现 NUL 字节。
+            // 这是一个非常廉价的二进制文件初步检查。
+            if (
+                bytes.includes(0)
+            ) {
+                throw new WorkspaceError(
+                    "binary_file",
+                    "File contains NUL bytes; only UTF-8 text is supported",
+                );
+            }
+
+            let content:
+                string;
+
+            try {
+                content =
+                    new TextDecoder(
+                        "utf-8",
+                        {
+                            // 遇到非法 UTF-8 字节序列时直接抛错，
+                            // 保证后续处理的 content 一定是有效 UTF-8 文本。
+                            fatal:
+                                true,
+
+                            // 识别 UTF-8 BOM。
+                            // BOM 不会作为正文中的 U+FEFF 返回。
+                            ignoreBOM:
+                                false,
+                        },
+                    ).decode(
+                        bytes,
+                    );
+            } catch (error) {
+                // TextDecoder 在 fatal 模式下遇到非法 UTF-8
+                // 通常会抛出 TypeError。
+                if (
+                    !(
+                        error instanceof
+                        TypeError
+                    )
+                ) {
+                    throw error;
+                }
+
+                throw new WorkspaceError(
+                    "invalid_encoding",
+                    "File is not valid UTF-8 text",
+                );
+            }
+
+            // 检测通常不应该出现在普通文本中的 C0 控制字符。
+            //
+            // 某些“伪文本”文件可能不包含 NUL，
+            // 但仍然含有大量其他二进制控制字符。
+            //
+            // 这里允许常见文本控制字符：
+            // \t  U+0009
+            // \n  U+000A
+            // \r  U+000D
+            if (
+                /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u
+                    .test(
+                        content,
+                    )
+            ) {
+                throw new WorkspaceError(
+                    "binary_file",
+                    "File contains unsupported control characters",
+                );
+            }
+
+            return {
+                // 解码后的 UTF-8 文本内容。
+                content,
+
+                // 文件原始字节。
+                // 后续可用于 revision、BOM 检测以及安全写回。
+                bytes,
+
+                // 文件实际字节长度。
+                byteLength:
+                bytes.length,
+
+                // 根据当前原始字节生成内容版本标识。
+                // 后续写入时可用于检测文件是否已经被其他操作修改。
+                revision:
+                    createWorkspaceRevision(
+                        bytes,
+                    ),
+
+                // 记录原文件是否包含 UTF-8 BOM，
+                // 方便写回文件时保留原始 BOM 风格。
+                hasUtf8Bom:
+                    hasUtf8Bom(
+                        bytes,
+                    ),
+
+                // 保存文件原始 mode，
+                // 后续写回或原子替换文件时可用于保留权限等元数据。
+                mode:
+                metadata.mode,
+            };
+        } finally {
+            // 无论读取成功还是中途抛错，都确保文件描述符被关闭。
+            await handle.close();
+        }
+    }
     /**
      * 读取文本文件
      * @param input
@@ -68,110 +402,42 @@ export class NodeWorkspace implements Workspace,SearchWorkspace {
         input: string,
         signal: AbortSignal,
     ): Promise<WorkspaceTextFile> {
-        return withFsErrors(signal, async () => {
-            // 先解析路径
-            const target = await this.resolveExistingPath(input);
-            // 判断是否是普通文件
-            if (!(await stat(target)).isFile()) {
-                throw new WorkspaceError(
-                    "not_file",
-                    "Path must be a regular file",
-                );
-            }
+        return withFsErrors(
+            signal,
 
-            signal.throwIfAborted();
-            // 以只读方式打开这个文件
-            const handle = await open(target, "r");
+            async () => {
+                const target =
+                    await this
+                        .resolveExistingPath(
+                            input,
+                        );
 
-            try {
-                // 再次检查是否是文件，防止第一次stat到真正的open之间，其他进程把文件替换为软链接、超大文件
-                const metadata = await handle.stat();
-
-                if (!metadata.isFile()) {
-                    throw new WorkspaceError(
-                        "not_file",
-                        "Path must be a regular file",
-                    );
-                }
-                // 如果文件大小超过限额最大长度
-                if (metadata.size > MAX_FILE_BYTES) {
-                    throw fileTooLarge();
-                }
-
-                // 多分配一个字节，作用是继续检查stat之后文件继续增长的情况
-                const buffer = Buffer.alloc(MAX_FILE_BYTES + 1);
-                let length = 0;
-
-                while (length < buffer.length) {
-                    signal.throwIfAborted();
-
-                    const { bytesRead } = await handle.read(
-                        buffer,
-                        length,
-                        // 每次读的块的大小是64kb，如果剩下的buffer空间不足64kb就把剩下的buffer空间读满
-                        Math.min(64 * 1024, buffer.length - length),
-                        length,
-                    );
-
-                    if (bytesRead === 0) {
-                        break;
-                    }
-
-                    length += bytesRead;
-                }
-
-                signal.throwIfAborted();
-                // 全部读完之后，再次判断，是否超出文件大小的限制
-                if (length > MAX_FILE_BYTES) {
-                    throw fileTooLarge();
-                }
-                // 创建Buffer视图
-                const bytes = buffer.subarray(0, length);
-                // NULL字节检测：文本文件几乎不含有\0，而二进制文件这种几乎必然含有\0，这是廉价的二进制检查
-                if (bytes.includes(0)) {
-                    throw new WorkspaceError(
-                        "binary_file",
-                        "File contains NUL bytes; only UTF-8 text is supported",
-                    );
-                }
-
-                let content: string;
-
-                try {
-
-                    content = new TextDecoder("utf-8", {
-                        fatal: true,// 遇到非法UTF-8序列的时候报错，保证读入的内容是可信文本
-                        ignoreBOM: false,// 忽略BOM
-                    }).decode(bytes);
-                } catch (error) {
-                    if (!(error instanceof TypeError)) {
-                        throw error;
-                    }
-
-                    throw new WorkspaceError(
-                        "invalid_encoding",
-                        "File is not valid UTF-8 text",
-                    );
-                }
-                // 检测不应该出现在正常文本中的控制字符，有些“伪文本”不含\0但是含大量其他控制符
-                if (
-                    /[\u0000-\u0008\u000b\u000c\u000e-\u001f]/u.test(content)
-                ) {
-                    throw new WorkspaceError(
-                        "binary_file",
-                        "File contains unsupported control characters",
-                    );
-                }
+                const document =
+                    await this
+                        .readTextDocument(
+                            target,
+                            signal,
+                        );
 
                 return {
-                    path: this.relativePath(target),// 相对于工作区的路径
-                    content,
-                    byteLength: length,// 实际的字节数
+                    path:
+                        this.relativePath(
+                            target,
+                        ),
+
+                    content:
+                    document.content,
+
+                    byteLength:
+                    document
+                        .byteLength,
+
+                    revision:
+                    document
+                        .revision,
                 };
-            } finally {
-                await handle.close();
-            }
-        });
+            },
+        );
     }
 
     /**
@@ -232,26 +498,489 @@ export class NodeWorkspace implements Workspace,SearchWorkspace {
     }
 
     /**
-     * 负责路径合法性和越界保护，并给出最后的解析路径
-     * @param input
+     * 在一个可能被并发修改、需要保证文件一致性、需要处理文件系统异常的环境中，完全地完成一次文本替换
+     * @param request
+     * @param signal
+     */
+    public async replaceText(
+        request:
+        WorkspaceReplaceTextRequest,
+
+        signal:
+        AbortSignal,
+    ): Promise<WorkspaceReplaceTextResult> {
+        return withFsErrors(
+            signal,
+
+            async () => {
+                // 解析文件真实路径
+                const target =
+                    await this
+                        .resolveExistingPath(
+                            request.path,
+                        );
+                // 读取当前文件
+                const current =
+                    await this
+                        .readTextDocument(
+                            target,
+                            signal,
+                        );
+                // 乐观并发控制
+                if (
+                    current.revision !==
+                    request
+                        .expectedRevision
+                ) {
+                    throw staleRevision(
+                        request
+                            .expectedRevision,
+
+                        current.revision,
+                    );
+                }
+                // 执行精确文本替换
+                const edited =
+                    applyExactTextEdit(
+                        current.content,
+
+                        request.oldText,
+
+                        request.newText,
+                    );
+                // 修改失败
+                if (!edited.ok) {
+                    throw new WorkspaceError(
+                        "conflict",
+
+                        edited.reason ===
+                        "not_found"
+                            ? "oldText was not found in the expected file version"
+                            : "oldText is not unique in the expected file version",
+
+                        {
+                            reason:
+                            edited.reason,
+
+                            currentRevision:
+                            current
+                                .revision,
+                        },
+                    );
+                }
+                // 内容实际上未改变，即newText==oldText
+                if (
+                    !edited.changed
+                ) {
+                    return {
+                        path:
+                            this.relativePath(
+                                target,
+                            ),
+
+                        previousRevision:
+                        current
+                            .revision,
+
+                        revision:
+                        current
+                            .revision,
+
+                        byteLength:
+                        current
+                            .byteLength,
+
+                        changed:
+                            false,
+                    };
+                }
+                // 重新编码，如果原本有BOM，重新编码BOM
+                const nextBytes =
+                    encodeTextDocument(
+                        edited.content,
+
+                        current
+                            .hasUtf8Bom,
+                    );
+                // 限制文件大小
+                if (
+                    nextBytes.length >
+                    MAX_FILE_BYTES
+                ) {
+                    throw fileTooLarge();
+                }
+                // 原子替换文件
+                await this
+                    .replaceFileAtomically(
+                        target,
+
+                        current.revision,
+
+                        nextBytes,
+
+                        current.mode,
+
+                        signal,
+                    );
+
+                return {
+                    path:
+                        this.relativePath(
+                            target,
+                        ),
+
+                    previousRevision:
+                    current
+                        .revision,
+
+                    revision:
+                        createWorkspaceRevision(
+                            nextBytes,
+                        ),
+
+                    byteLength:
+                    nextBytes.length,
+
+                    changed:
+                        true,
+                };
+            },
+        );
+    }
+
+    /**
+     * 安全地解析一个”准备创建的新文件“的路径，并确保这个文件最终只能被创建在workspace根目录内部
+     * @param request
+     * @param signal
+     */
+    public async createTextFile(
+        request:
+        WorkspaceCreateTextFileRequest,
+
+        signal:
+        AbortSignal,
+    ): Promise<WorkspaceCreateTextFileResult> {
+        return withFsErrors(
+            signal,
+
+            async () => {
+                // 获得创建文件所在的路径
+                const target =
+                    await this
+                        .resolveCreatableFilePath(
+                            request.path,
+                        );
+                // 获取要写入文件的内容
+                const bytes =
+                    Buffer.from(
+                        request.content,
+                        "utf8",
+                    );
+                // 如果文件过大，直接报错
+                if (
+                    bytes.length >
+                    MAX_FILE_BYTES
+                ) {
+                    throw fileTooLarge();
+                }
+
+                signal
+                    .throwIfAborted();
+
+                /*
+                 * "wx":
+                 *
+                 * create exclusively;
+                 * fail if path already exists.
+                 *
+                 * Never overwrite an existing
+                 * user file.
+                 */
+                const handle =
+                    await open(
+                        target,
+                        "wx",
+                    );
+                // 分块写文件
+                try {
+                    let offset = 0;
+
+                    while (
+                        offset <
+                        bytes.length
+                        ) {
+                        signal
+                            .throwIfAborted();
+
+                        const {
+                            bytesWritten,
+                        } =
+                            await handle
+                                .write(
+                                    bytes,
+
+                                    offset,
+
+                                    Math.min(
+                                        64 * 1024,
+
+                                        bytes.length -
+                                        offset,
+                                    ),
+
+                                    offset,
+                                );
+                        // 写文件无进展，直接报错
+                        if (
+                            bytesWritten <= 0
+                        ) {
+                            throw new Error(
+                                "Failed to make progress while creating file",
+                            );
+                        }
+
+                        offset +=
+                            bytesWritten;
+                    }
+
+                    await handle.sync();
+                } catch (error) {
+                    await handle.close();
+
+                    /*
+                     * Best effort rollback:
+                     * don't leave a partially
+                     * created file behind.
+                     */
+                    await unlink(
+                        target,
+                    ).catch(
+                        () => undefined,
+                    );
+
+                    throw error;
+                }
+
+                await handle.close();
+
+                return {
+                    path:
+                        this.relativePath(
+                            target,
+                        ),
+
+                    revision:
+                        createWorkspaceRevision(
+                            bytes,
+                        ),
+
+                    byteLength:
+                    bytes.length,
+                };
+            },
+        );
+    }
+
+    /**
+     * 不是直接修改文件，先创建temp文件，把完整文件写入temp，刷盘，检查target版本号，再rename
+     * @param target 原本的文件地址
+     * @param expectedRevision 期待的版本号
+     * @param nextBytes 已经替换后的文件内容
+     * @param originalMode 原本文件的权限
+     * @param signal
      * @private
      */
-    private async resolveExistingPath(input: string): Promise<string> {
-        // 快速拒绝明确非法输入
+    private async replaceFileAtomically(
+        target: string,// 原文件地址
+        expectedRevision: string,
+        nextBytes: Buffer,
+        originalMode: number,
+        signal: AbortSignal,
+    ): Promise<void> {
+        signal.throwIfAborted();
+        // 获取目标文件所在的目录
+        const directory =
+            path.dirname(
+                target,
+            );
+        // 创建一个临时文件路径，临时文件位于源文件的同一目录下，遗忘rename的原子替换，要求源文件和目标文件位于同一文件系统
+        const tempPath =
+            path.join(
+                directory,
+
+                `.${path.basename(
+                    target,
+                )}.agent-${randomUUID()}.tmp`,
+            );
+        // 资源清理状态标记
+        let tempExists =
+            false;
+
+        try {
+            // 打开临时文件
+            const tempHandle =
+                await open(
+                    tempPath,
+
+                    "wx",// 如果文件存在，报错
+
+                    originalMode &
+                    0o777,
+                );
+            // 创建成功后记录状态
+            tempExists = true;
+
+            try {
+                // 记录已经写入的位置
+                let offset = 0;
+                /**
+                 * 分快写的好处：
+                 * 1. 可以在每个块之间，检查是否取消任务，一次性写入超大文件，可能会没有取消检查的机会
+                 *
+                 */
+                while (
+                    offset <
+                    nextBytes.length
+                    ) {
+                    signal
+                        .throwIfAborted();
+                    // 写入的字节数
+                    const {
+                        bytesWritten,
+                    } =
+                        await tempHandle
+                            .write(
+                                nextBytes,
+
+                                offset,
+                                // 每次最大写64KB
+                                Math.min(
+                                    64 * 1024,
+
+                                    nextBytes
+                                        .length -
+                                    offset,
+                                ),
+
+                                offset,
+                            );
+                    // 进度保护，如果没有写入文件的进度没有取得进展，就直接失败
+                    if (
+                        bytesWritten <= 0
+                    ) {
+                        throw new Error(
+                            "Failed to make progress while writing temporary file",
+                        );
+                    }
+                    // 记录已经写入文件的位置
+                    offset +=
+                        bytesWritten;
+                }
+
+                /*
+                 * 在让这个新文件成为正式文件之前，先保证它的内容已经尽量持久化
+                 */
+                await tempHandle
+                    .sync();
+            } finally {
+                // 资源释放，关闭文件
+                await tempHandle
+                    .close();
+            }
+
+            /*
+             * 再次读取文件
+             */
+            const current =
+                await this
+                    .readTextDocument(
+                        target,
+                        signal,
+                    );
+            // 进行版本检查
+            if (
+                current.revision !==
+                expectedRevision
+            ) {
+                throw staleRevision(
+                    expectedRevision,
+
+                    current.revision,
+                );
+            }
+
+            signal.throwIfAborted();
+            // 原子性改名
+            await rename(
+                tempPath,
+                target,
+            );
+            // 临时文件不存在
+            tempExists =
+                false;
+        } finally {
+            if (tempExists) {
+                await unlink(
+                    tempPath,
+                ).catch(
+                    () => undefined,
+                );
+            }
+        }
+    }
+    private validatePathSegments(
+        input: string,
+    ): readonly string[] {
+        /*
+         * 第一层：
+         * 快速拒绝明显不是 workspace-relative path 的输入。
+         */
         if (
-            input.length === 0 || // 输入为0
-            /^[\\/]/u.test(input) || // 绝对路径
-            /[<>:"|?*\u0000-\u001f]/u.test(input)  // 路径中有保留字符和控制字符
+            input.length === 0 ||
+            /^[\\/]/u.test(
+                input,
+            ) ||
+            /[<>:"|?*\u0000-\u001f]/u.test(
+                input,
+            )
         ) {
             throw new WorkspaceError(
                 "invalid_path",
+
                 "Use a workspace-relative path without drive letters or special characters",
             );
         }
-        //逐段校验目录片段
-        const segments = input.split(/[\\/]/u);
 
-        for (const segment of segments) {
+        /*
+         * 同时支持模型传：
+         *
+         * src/auth.ts
+         *
+         * 或 Windows 风格：
+         *
+         * src\auth.ts
+         */
+        const segments =
+            input.split(
+                /[\\/]/u,
+            );
+
+        for (
+            const segment
+            of segments
+            ) {
+            /*
+             * "." / ".." 本身暂时不在这里判断越界。
+             *
+             * 因为：
+             *
+             * src/../index.ts
+             *
+             * 在字符串层面不一定非法。
+             *
+             * 真正是否越界交给后面的
+             * path.resolve + assertInside。
+             */
             if (
                 segment === "." ||
                 segment === ".." ||
@@ -260,16 +989,39 @@ export class NodeWorkspace implements Workspace,SearchWorkspace {
                 continue;
             }
 
+            /*
+             * Windows 特殊规则：
+             *
+             * foo.
+             * foo<space>
+             *
+             * 都属于我们不接受的名字。
+             */
             if (
-                /[. ]$/u.test(segment) || // Windows不允许文件名以点或空格结尾
-                /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/iu.test(segment)
+                /[. ]$/u.test(
+                    segment,
+                ) ||
+                /^(con|prn|aux|nul|com[1-9¹²³]|lpt[1-9¹²³])(?:\.|$)/iu.test(
+                    segment,
+                )
             ) {
                 throw new WorkspaceError(
                     "invalid_path",
+
                     "Path contains an unsupported Windows filename",
                 );
             }
         }
+
+        return segments;
+    }
+    /**
+     * 负责路径合法性和越界保护，并给出最后的解析路径
+     * @param input
+     * @private
+     */
+    private async resolveExistingPath(input: string): Promise<string> {
+        const segments=this.validatePathSegments(input);
         //拼接并按字符串层面检查越界
         const candidate = path.resolve(this.root, ...segments);
         this.assertInside(candidate);
@@ -716,6 +1468,10 @@ async function withFsErrors<T>(
             case "ENFILE":
                 mapped = "io_error";
                 break;
+            case "EEXIST":
+                mapped =
+                    "conflict";
+                break;
             default:
                 throw error;
         }
@@ -1097,4 +1853,89 @@ function getErrorMessage(
     return error instanceof Error
         ? error.message
         : String(error);
+}
+
+/**
+ * 根据传入的字节数组，转为sha256
+ * @param bytes
+ */
+function createWorkspaceRevision(
+    bytes: Uint8Array,
+): string {
+    return (
+        "sha256:" +
+        createHash(
+            "sha256",
+        )
+            .update(
+                bytes,
+            )
+            .digest(
+                "hex",
+            )
+    );
+}
+
+/**
+ * 检测UTF-8 BOM
+ * @param bytes
+ */
+function hasUtf8Bom(
+    bytes: Uint8Array,
+): boolean {
+    return (
+        bytes.length >= 3 &&
+        bytes[0] === 0xef &&
+        bytes[1] === 0xbb &&
+        bytes[2] === 0xbf
+    );
+}
+// 把BOM 本身保存成Buffer
+const UTF8_BOM =
+    Buffer.from([
+        0xef,
+        0xbb,
+        0xbf,
+    ]);
+
+/**
+ *
+ * @param content
+ * @param hasBom
+ */
+function encodeTextDocument(
+    content: string,
+    hasBom: boolean,
+): Buffer {
+    const body =
+        Buffer.from(
+            content,
+            "utf8",
+        );
+
+    return hasBom
+        ? Buffer.concat([
+            UTF8_BOM,
+            body,
+        ])
+        : body;
+}
+function staleRevision(
+    expectedRevision: string,
+    currentRevision: string,
+): WorkspaceError {
+    return new WorkspaceError(
+        "conflict",
+
+        "File changed after it was read; read the file again before editing",
+
+        {
+            reason:
+                "stale_revision",
+
+            expectedRevision,
+
+            currentRevision,
+        },
+    );
 }

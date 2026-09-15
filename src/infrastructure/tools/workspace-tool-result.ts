@@ -54,6 +54,7 @@ const toolErrorCodes:
 
         io_error:
             "execution_failed",
+        conflict:"conflict"
     };
 
 export async function workspaceToolResult<T extends JsonValue>(
@@ -79,9 +80,17 @@ export async function workspaceToolResult<T extends JsonValue>(
                 code: toolErrorCodes[error.code],
                 message: error.message,
                 retryable: false,
-                details: {
-                    workspaceCode: error.code,
-                },
+                details: error.details === null
+                    ? {
+                        workspaceCode:
+                        error.code,
+                    }
+                    : {
+                        workspaceCode:
+                        error.code,
+
+                        ...error.details,
+                    },
             },
         };
     }

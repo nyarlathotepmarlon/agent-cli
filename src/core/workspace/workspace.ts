@@ -3,6 +3,7 @@ export type WorkspaceTextFile = {
     readonly path: string; // 回显规范化的路径
     readonly content: string; // 真正交给模型看的文本
     readonly byteLength: number; // 磁盘真实字节数
+    readonly revision: string; // 文件校验码
 };
 // 描述目录中的一个条目
 export type WorkspaceEntry = {

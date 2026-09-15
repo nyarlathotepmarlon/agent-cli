@@ -1,8 +1,12 @@
+import type {
+    JsonObject,
+} from "../shared/json.js";
 export type WorkspaceErrorCode =
     | "invalid_path"
     | "outside_workspace"
     | "invalid_range"
     | "invalid_pattern"
+    | "conflict"
     | "text_too_large"
     | "not_found"
     | "not_file"
@@ -18,6 +22,8 @@ export class WorkspaceError extends Error {
     public constructor(
         public readonly code: WorkspaceErrorCode,
         message: string,
+        public readonly details:
+            JsonObject | null = null,// 仅仅告诉模型code不够，还要告诉模型具体的信息
     ) {
         super(message);
         this.name = "WorkspaceError";

@@ -29,6 +29,8 @@ import {
 import {
     createReadFileTool,
 } from "./read-file-tool.js";
+import {createEditFileTool} from "./edit-file-tool.js";
+import {createCreateFileTool} from "./create-file-tool.js";
 
 export async function createWorkspaceToolRuntime(
     cwd: string,
@@ -57,6 +59,14 @@ export async function createWorkspaceToolRuntime(
             createGrepTool(
                 workspace,
             ),
-        ]),
+
+            createEditFileTool(
+                workspace,
+            ),
+
+            createCreateFileTool(
+                workspace,
+            ),
+        ])
     );
 }

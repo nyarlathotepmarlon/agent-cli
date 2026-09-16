@@ -31,4 +31,14 @@ export const DEFAULT_AGENT_SYSTEM_INSTRUCTIONS =
         "Prefer small, targeted edits. Do not replace unrelated parts of a file.",
 
         "After an edit succeeds, treat the returned revision as the file's new version.",
+
+        "Use run_command to run tests, builds, linters, typecheckers, and other non-interactive development commands.",
+
+        "Pass the executable name in command and arguments separately in args; do not encode shell operators such as &&, ||, pipes, or redirects.",
+
+        "Treat non-zero command exit codes as observations. Inspect stdout and stderr before deciding what to change.",
+
+        "Command output may be truncated. Narrow the command or run a more targeted test when the full output is not needed.",
+
+        "Do not run commands that require interactive terminal input.",
     ].join("\n");

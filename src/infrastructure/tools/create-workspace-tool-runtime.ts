@@ -31,6 +31,8 @@ import {
 } from "./read-file-tool.js";
 import {createEditFileTool} from "./edit-file-tool.js";
 import {createCreateFileTool} from "./create-file-tool.js";
+import {NodeProcessRunner} from "../process/node-process-runner.js";
+import {createRunCommandTool} from "./run_command.js";
 
 export async function createWorkspaceToolRuntime(
     cwd: string,
@@ -41,7 +43,11 @@ export async function createWorkspaceToolRuntime(
             cwd,
             signal,
         );
-
+    const processRunner =
+        await NodeProcessRunner.create(
+            workspace.root,
+            signal,
+        );
     return new DefaultAgentToolRuntime(
         new ToolRegistry([
             createReadFileTool(
@@ -66,6 +72,9 @@ export async function createWorkspaceToolRuntime(
 
             createCreateFileTool(
                 workspace,
+            ),
+            createRunCommandTool(
+                processRunner,
             ),
         ])
     );

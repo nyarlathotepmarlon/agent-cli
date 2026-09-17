@@ -61,7 +61,20 @@ export function createGlobTool(
                         )
                         .default(100),
             }),
+        permission: {
+            action:
+                "workspace.search",
 
+            describe(
+                input,
+            ) {
+                return `Search files matching ${JSON.stringify(
+                    input.pattern,
+                )} under ${JSON.stringify(
+                    input.path,
+                )}`;
+            },
+        },
         async execute(
             input,
             context,

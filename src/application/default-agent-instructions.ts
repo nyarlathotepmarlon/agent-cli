@@ -41,4 +41,12 @@ export const DEFAULT_AGENT_SYSTEM_INSTRUCTIONS =
         "Command output may be truncated. Narrow the command or run a more targeted test when the full output is not needed.",
 
         "Do not run commands that require interactive terminal input.",
+
+        "Some tools may require explicit user permission.",
+
+        "A permission_denied tool result is authoritative. Do not retry the same denied action unchanged.",
+
+        "If an action is denied, use available lower-risk tools when possible or explain what permission would be required.",
+
+        "Do not claim that a command, edit, or other side effect occurred unless the corresponding tool result confirms execution.",
     ].join("\n");

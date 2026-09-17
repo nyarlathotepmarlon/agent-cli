@@ -29,7 +29,27 @@ import { NodeDelay } from "../../../src/infrastructure/time/node-delay.js";
 import type { Model } from "../../../src/core/model/model.js";
 import type { ModelResponse } from "../../../src/core/model/model-response.js";
 import type { ToolCall } from "../../../src/core/tools/tool-call.js";
+import type {
+    JsonObject,
+} from "../../../src/core/shared/json.js";
 
+import type {
+    Tool,
+} from "../../../src/core/tools/tool.js";
+
+import type {
+    PermissionAuthorizer,
+} from "../../../src/core/permissions/permission.js";
+
+import {
+    DefaultAgentToolRuntime,
+} from "../../../src/core/tools/default-agent-tool-runtime.js";
+
+import {
+    ToolRegistry,
+} from "../../../src/core/tools/tool-registry.js";
+import {ModePermissionPolicy} from "../../../src/core/permissions/mode-permission-policy.js";
+import {DefaultPermissionAuthorizer} from "../../../src/core/permissions/default-permission-authorizer.js";
 let temporary: string;
 let root: string;
 let outside: string;
@@ -39,6 +59,54 @@ const links: string[] = [];
 
 function signal() {
     return new AbortController().signal;
+}
+const allowAllAuthorizer:
+    PermissionAuthorizer = {
+    async authorize(
+        _request,
+        abortSignal,
+    ) {
+        abortSignal
+            .throwIfAborted();
+
+        return {
+            allowed: true,
+            source: "policy",
+        };
+    },
+};
+
+async function executeTool(
+    tool: Tool,
+    input: JsonObject,
+    abortSignal:
+    AbortSignal = signal(),
+) {
+    const runtime =
+        new DefaultAgentToolRuntime(
+            new ToolRegistry([
+                tool,
+            ]),
+
+            allowAllAuthorizer,
+        );
+
+    return runtime.execute(
+        {
+            id:
+                `test_${tool.name}`,
+
+            name:
+            tool.name,
+
+            input,
+        },
+
+        {
+            signal:
+            abortSignal,
+        },
+    );
 }
 
 beforeEach(async () => {
@@ -283,13 +351,18 @@ it("bounds directory enumeration and marks the result incomplete", async () => {
 it("paginates complete lines and supplies the next line number", async () => {
     const tool = createReadFileTool(workspace);
 
-    const first = await tool.execute(
-        {
-            path: "中文 目录/示例.txt",
-            maxLines: 1,
-        },
-        { signal: signal() },
-    );
+    const first =
+        await executeTool(
+            tool,
+
+            {
+                path:
+                    "中文 目录/示例.txt",
+
+                maxLines:
+                    1,
+            },
+        );
 
     expect(first).toMatchObject({
         ok: true,
@@ -304,12 +377,12 @@ it("paginates complete lines and supplies the next line number", async () => {
     });
 
     expect(
-        await tool.execute(
+        await executeTool(
+            tool,
             {
                 path: "中文 目录/示例.txt",
                 startLine: 2,
             },
-            { signal: signal() },
         ),
     ).toMatchObject({
         ok: true,
@@ -337,9 +410,9 @@ it("handles empty files and rejects invalid ranges or oversized single lines", a
     const tool = createReadFileTool(workspace);
 
     expect(
-        await tool.execute(
+        await executeTool(
+            tool,
             { path: "empty.txt" },
-            { signal: signal() },
         ),
     ).toMatchObject({
         ok: true,
@@ -353,12 +426,12 @@ it("handles empty files and rejects invalid ranges or oversized single lines", a
     });
 
     expect(
-        await tool.execute(
+        await executeTool(
+            tool,
             {
                 path: "empty.txt",
                 startLine: 2,
             },
-            { signal: signal() },
         ),
     ).toMatchObject({
         ok: false,
@@ -368,9 +441,9 @@ it("handles empty files and rejects invalid ranges or oversized single lines", a
     });
 
     expect(
-        await tool.execute(
+        await executeTool(
+            tool,
             { path: "long.txt" },
-            { signal: signal() },
         ),
     ).toMatchObject({
         ok: false,
@@ -384,10 +457,10 @@ it("handles empty files and rejects invalid ranges or oversized single lines", a
 
 it("maps workspace failures to observations and supplies directory defaults", async () => {
     expect(
-        await createReadFileTool(workspace).execute(
+        await executeTool(
+            createReadFileTool(workspace),
             { path: "../repo-extra/marker.txt" },
-            { signal: signal() },
-        ),
+        )
     ).toMatchObject({
         ok: false,
         error: {
@@ -396,10 +469,10 @@ it("maps workspace failures to observations and supplies directory defaults", as
     });
 
     expect(
-        await createListDirectoryTool(workspace).execute(
-            {},
-            { signal: signal() },
-        ),
+        await executeTool(
+            createListDirectoryTool(workspace),
+            {}
+        )
     ).toMatchObject({
         ok: true,
         output: {
@@ -416,10 +489,11 @@ it("preserves cancellation", async () => {
     controller.abort(reason);
 
     await expect(
-        createReadFileTool(workspace).execute(
+        executeTool(
+            createReadFileTool(workspace),
             { path: "marker.txt" },
-            { signal: controller.signal },
-        ),
+            controller.signal
+        )
     ).rejects.toBe(reason);
 });
 
@@ -514,7 +588,26 @@ it("binds each application run to its requested cwd and feeds file content back"
         ),
 
         createToolRuntime:
-        createWorkspaceToolRuntime,
+            async (request) => {
+                const policy =
+                    new ModePermissionPolicy(
+                        request
+                            .permissionMode,
+                    );
+
+                const authorizer =
+                    new DefaultPermissionAuthorizer(
+                        policy,
+
+                        null,
+                    );
+
+                return createWorkspaceToolRuntime(
+                    request.cwd,
+                    request.signal,
+                    authorizer,
+                );
+            },
     });
 
     for (
@@ -533,6 +626,8 @@ it("binds each application run to its requested cwd and feeds file content back"
                 model: "filesystem-script",
             },
             signal: signal(),
+            permissionMode:
+                "read-only",
         });
 
         expect(result.status).toBe("completed");

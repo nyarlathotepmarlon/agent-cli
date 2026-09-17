@@ -25,7 +25,9 @@ import {
 import {
     createListDirectoryTool,
 } from "./list-directory-tool.js";
-
+import type {
+    PermissionAuthorizer,
+} from "../../core/permissions/permission.js";
 import {
     createReadFileTool,
 } from "./read-file-tool.js";
@@ -37,6 +39,7 @@ import {createRunCommandTool} from "./run_command.js";
 export async function createWorkspaceToolRuntime(
     cwd: string,
     signal: AbortSignal,
+    authorizer:PermissionAuthorizer
 ): Promise<AgentToolRuntime> {
     const workspace =
         await NodeWorkspace.create(
@@ -76,6 +79,6 @@ export async function createWorkspaceToolRuntime(
             createRunCommandTool(
                 processRunner,
             ),
-        ])
+        ]),authorizer
     );
 }

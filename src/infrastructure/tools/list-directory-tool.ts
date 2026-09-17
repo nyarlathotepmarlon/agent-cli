@@ -14,7 +14,18 @@ export function createListDirectoryTool(workspace: Workspace) {
         schema: z.strictObject({
             path: z.string().min(1).max(4096).default("."),
         }),
+        permission: {
+            action:
+                "workspace.read",
 
+            describe(
+                input,
+            ) {
+                return `Read file ${JSON.stringify(
+                    input.path,
+                )}`;
+            },
+        },
         async execute(input, context) {
             return workspaceToolResult(
                 context.signal,

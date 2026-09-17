@@ -9,6 +9,7 @@ import { DefaultAgentToolRuntime } from "../../../src/core/tools/default-agent-t
 import { ToolRegistry } from "../../../src/core/tools/tool-registry.js";
 import { NodeDelay } from "../../../src/infrastructure/time/node-delay.js";
 import { addIntegersTool } from "../../../src/infrastructure/tools/add-integers-tool.js";
+import type {PermissionAuthorizer} from "../../../src/core/permissions/permission.js";
 
 function response(
     toolCalls: readonly ToolCall[] = [],
@@ -76,7 +77,20 @@ it("feeds validation errors back and completes after corrected arguments", async
         }),
         new NodeDelay(),
     );
+    const allowAllAuthorizer:
+        PermissionAuthorizer = {
+        async authorize(
+            _request,
+            signal,
+        ) {
+            signal.throwIfAborted();
 
+            return {
+                allowed: true,
+                source: "policy",
+            };
+        },
+    };
     const state = await runtime.run({
         state: createAgentState(
             { maxTurns: 5, maxToolCalls: 5, maxTotalTokens: null },
@@ -84,7 +98,7 @@ it("feeds validation errors back and completes after corrected arguments", async
         ),
         model,
         toolRuntime: new DefaultAgentToolRuntime(
-            new ToolRegistry([addIntegersTool]),
+            new ToolRegistry([addIntegersTool]),allowAllAuthorizer
         ),
         signal: new AbortController().signal,
     });

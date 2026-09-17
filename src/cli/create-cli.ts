@@ -23,6 +23,7 @@ import {
     ExitCode,
     type ExitCode as ExitCodeValue,
 } from "./exit-code.js";
+import {parsePermissionMode, type PermissionMode} from "../core/permissions/permission.js";
 /**
  * 创建cli所需要的所有外部依赖
  */
@@ -39,6 +40,9 @@ export interface CreateCliDependencies {
     readonly initialCwd: string;
 
     readonly defaultModelSelection: ModelSelection;
+
+    readonly defaultPermissionMode:
+        PermissionMode;
 }
 
 interface CliOptions {
@@ -49,6 +53,7 @@ interface CliOptions {
     readonly provider: string;
 
     readonly model: string;
+    readonly permissionMode:PermissionMode
 }
 
 export function createCli(
@@ -93,6 +98,16 @@ export function createCli(
             dependencies
                 .defaultModelSelection
                 .model,
+        )
+        .option(
+            "--permission-mode <mode>",
+
+            "permission mode: read-only, safe, auto-edit, or full-access",
+
+            parsePermissionMode,
+
+            dependencies
+                .defaultPermissionMode,
         )
         .showHelpAfterError(
             "(run with --help for usage)",
@@ -154,7 +169,9 @@ export function createCli(
                             },
                             signal:
                             dependencies.signal,
-
+                            permissionMode:
+                            options
+                                .permissionMode,
                         },
                     );
                 // 将Agent运行结果转为退出码

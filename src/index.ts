@@ -61,7 +61,17 @@ process.on(
     "SIGINT",
     handleSigint,
 );
+import {
+    DefaultPermissionAuthorizer,
+} from "./core/permissions/default-permission-authorizer.js";
 
+import {
+    ModePermissionPolicy,
+} from "./core/permissions/mode-permission-policy.js";
+
+import {
+    NodePermissionApprover,
+} from "./cli/node-permission-approver.js";
 try {
     const version =
         await readPackageVersion();
@@ -113,7 +123,8 @@ try {
                     5_000,
                 ),
         });
-
+    const permissionApprover =
+        new NodePermissionApprover();
     const runtime =
         new DefaultAgentRuntime(
             retryPolicy,
@@ -138,7 +149,31 @@ try {
 
             runtime,
 
-            createToolRuntime:createWorkspaceToolRuntime,
+            createToolRuntime:async(request)=>{
+                const policy =
+                    new ModePermissionPolicy(
+                        request
+                            .permissionMode,
+                    );
+
+                const authorizer =
+                    new DefaultPermissionAuthorizer(
+                        policy,
+
+                        request.mode ===
+                        "interactive"
+                            ? permissionApprover
+                            : null,
+                    );
+
+                return createWorkspaceToolRuntime(
+                    request.cwd,
+
+                    request.signal,
+
+                    authorizer,
+                );
+            }
         });
 
     const exitCode =
@@ -168,6 +203,8 @@ try {
                 },
                 initialCwd:
                     process.cwd(),
+                defaultPermissionMode:
+                    "safe",
             },
         );
 

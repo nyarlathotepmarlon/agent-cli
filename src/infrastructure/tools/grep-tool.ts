@@ -68,7 +68,20 @@ export function createGrepTool(
                         )
                         .default(50),
             }),
+        permission: {
+            action:
+                "workspace.search",
 
+            describe(
+                input,
+            ) {
+                return `Search repository text for ${JSON.stringify(
+                    input.query,
+                )} under ${JSON.stringify(
+                    input.path,
+                )}`;
+            },
+        },
         async execute(
             input,
             context,

@@ -13,7 +13,13 @@ export const addIntegersTool = defineTool({
         b: z.number().int().min(-1_000_000).max(1_000_000)
             .describe("The second integer."),
     }),
+    permission: {
+        action: "local.compute",
 
+        describe(input) {
+            return `Add integers ${input.a} and ${input.b}`;
+        },
+    },
     async execute(input, context) {
         context.signal.throwIfAborted();
 

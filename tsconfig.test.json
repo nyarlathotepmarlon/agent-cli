@@ -29,7 +29,9 @@
   },
   "include": [
     "src/**/*.ts",
-    "tests/**/*.test.ts"
+    "tests/**/*.test.ts",
+    "node_modules/.pnpm/vitest@5.0.1_@types+node@26_fe4e9b0dedce290017fcc2a0615e01f2/node_modules/vitest/globals.d.ts",
+    "node_modules/.pnpm/vitest@5.0.1_@types+node@26_fe4e9b0dedce290017fcc2a0615e01f2/node_modules/vitest/globals.d.ts"
   ],
   "exclude": [
     "node_modules",

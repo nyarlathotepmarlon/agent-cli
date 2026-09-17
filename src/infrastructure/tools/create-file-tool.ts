@@ -44,7 +44,18 @@ export function createCreateFileTool(
                             MAX_CREATE_TEXT_CHARS,
                         ),
             }),
+        permission: {
+            action:
+                "workspace.write",
 
+            describe(
+                input,
+            ) {
+                return `Create file ${JSON.stringify(
+                    input.path,
+                )}`;
+            },
+        },
         async execute(
             input,
             context,

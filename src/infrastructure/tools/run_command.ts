@@ -96,7 +96,27 @@ export function createRunCommandTool(
                             DEFAULT_COMMAND_TIMEOUT_MS,
                         ),
             }),
+        permission: {
+            action:
+                "process.execute",
 
+            describe(
+                input,
+            ) {
+                const command =
+                    [
+                        input.command,
+
+                        ...input.args.map(
+                            quoteCommandArgument,
+                        ),
+                    ].join(" ");
+
+                return `Run ${command} in ${JSON.stringify(
+                    input.cwd,
+                )}`;
+            },
+        },
         async execute(
             input,
             context,
@@ -259,4 +279,20 @@ function mapStartError(
                     false,
             };
     }
+}
+function quoteCommandArgument(
+    value: string,
+): string {
+    if (
+        /^[A-Za-z0-9_./:@=-]+$/u
+            .test(
+                value,
+            )
+    ) {
+        return value;
+    }
+
+    return JSON.stringify(
+        value,
+    );
 }

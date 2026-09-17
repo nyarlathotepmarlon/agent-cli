@@ -57,7 +57,18 @@ export function createEditFileTool(
                             MAX_EDIT_TEXT_CHARS,
                         ),
             }),
+        permission: {
+            action:
+                "workspace.write",
 
+            describe(
+                input,
+            ) {
+                return `Edit existing file ${JSON.stringify(
+                    input.path,
+                )}`;
+            },
+        },
         async execute(
             input,
             context,

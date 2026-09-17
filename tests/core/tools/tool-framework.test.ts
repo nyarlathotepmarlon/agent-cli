@@ -8,9 +8,27 @@ import type { Tool } from "../../../src/core/tools/tool.js";
 import type { ToolResult } from "../../../src/core/tools/tool-result.js";
 import { addIntegersTool } from "../../../src/infrastructure/tools/add-integers-tool.js";
 import { defineTool } from "../../../src/infrastructure/tools/define-tool.js";
+const localComputePermission = {
+    action:
+        "local.compute" as const,
 
+    describe() {
+        return "Execute test tool";
+    },
+};
+const allowAllAuthorizer = {
+    async authorize() {
+        return {
+            allowed:
+                true as const,
+
+            source:
+                "policy" as const,
+        };
+    },
+};
 function createRuntime(tools: readonly Tool[] = [addIntegersTool]) {
-    return new DefaultAgentToolRuntime(new ToolRegistry(tools));
+    return new DefaultAgentToolRuntime(new ToolRegistry(tools),allowAllAuthorizer);
 }
 
 function context() {
@@ -81,6 +99,8 @@ describe("Tool framework", () => {
             description: "Accept a number.",
             schema: z.strictObject({ value: z.number() }),
             execute,
+            permission:
+            localComputePermission,
         });
 
         const result = await createRuntime([tool]).execute({
@@ -133,6 +153,8 @@ describe("Tool framework", () => {
             async execute(): Promise<ToolResult> {
                 return { ok: true, output: "unused" };
             },
+            permission:
+            localComputePermission,
         })).toThrow("strict object input schema");
     });
 
@@ -152,6 +174,8 @@ describe("Tool framework", () => {
             async execute() {
                 return failure;
             },
+            permission:
+            localComputePermission,
         });
 
         const result = await createRuntime([tool]).execute({
@@ -172,6 +196,8 @@ describe("Tool framework", () => {
             async execute(): Promise<ToolResult> {
                 throw bug;
             },
+            permission:
+            localComputePermission,
         });
 
         await expect(createRuntime([tool]).execute({
@@ -190,6 +216,8 @@ describe("Tool framework", () => {
             description: "Test cancellation.",
             schema: z.strictObject({}),
             execute,
+            permission:
+            localComputePermission,
         });
         const controller = new AbortController();
         const reason = new Error("User cancelled");
@@ -215,6 +243,8 @@ describe("Tool framework", () => {
                 controller.abort(reason);
                 return { ok: true, output: "late result" };
             },
+            permission:
+            localComputePermission,
         });
 
         await expect(createRuntime([tool]).execute({

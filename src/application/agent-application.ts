@@ -31,6 +31,7 @@ import type {
 import {
     DEFAULT_AGENT_SYSTEM_INSTRUCTIONS,
 } from "./default-agent-instructions.js";
+import type {PermissionMode} from "../core/permissions/permission.js";
 
 export type AgentRunMode =
     | "interactive"
@@ -51,6 +52,8 @@ export interface AgentRunRequest {
 
     readonly signal:
         AbortSignal;
+    readonly permissionMode:
+        PermissionMode;
 }
 
 interface AgentRunResultBase {
@@ -144,6 +147,19 @@ export interface AgentApplication {
         request: AgentRunRequest,
     ): Promise<AgentRunResult>;
 }
+export interface ToolRuntimeFactoryRequest {
+    readonly cwd:
+        string;
+
+    readonly mode:
+        AgentRunMode;
+
+    readonly permissionMode:
+        PermissionMode;
+
+    readonly signal:
+        AbortSignal;
+}
 // 默认AgentApplication实现的依赖配置
 export interface DefaultAgentApplicationOptions {
     readonly limits:
@@ -155,10 +171,12 @@ export interface DefaultAgentApplicationOptions {
     readonly runtime:
         AgentRuntime;
 
-    readonly createToolRuntime:(
-        cwd:string,
-        signal:AbortSignal,
-    )=>Promise<AgentToolRuntime>
+    readonly createToolRuntime:
+        (
+            request:
+            ToolRuntimeFactoryRequest,
+        ) =>
+            Promise<AgentToolRuntime>;
 
     readonly systemInstructions?:
         string;
@@ -234,9 +252,12 @@ export class DefaultAgentApplication
                     null,
             };
         }
-        const toolRuntime=await this.options.createToolRuntime(
-            request.cwd, // 这是解析过后的工作区
-            request.signal
+        const toolRuntime=await this.options.createToolRuntime({
+            cwd:request.cwd, // 这是解析过后的工作区
+            signal:request.signal,
+            permissionMode:request.permissionMode,
+            mode:request.mode,
+        }
         )
         // 解析实际模型
         const model =

@@ -28,6 +28,18 @@ export function createReadFileTool(workspace: Workspace) {
             maxLines: z.number().int().min(1).max(200)
                 .default(100),
         }),
+        permission: {
+            action:
+                "workspace.read",
+
+            describe(
+                input,
+            ) {
+                return `Read file ${JSON.stringify(
+                    input.path,
+                )}`;
+            },
+        },
         /**
          *
          * @param input

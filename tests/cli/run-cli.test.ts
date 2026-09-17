@@ -185,6 +185,8 @@ describe("runCli", () => {
                         version: "1.0.0",
 
                         initialCwd,
+                        defaultPermissionMode:
+                            "safe",
                     },
                 );
 
@@ -274,6 +276,8 @@ describe("runCli", () => {
 
                         initialCwd:
                             process.cwd(),
+                        defaultPermissionMode:
+                            "safe",
                     },
                 );
 
@@ -330,6 +334,8 @@ describe("runCli", () => {
 
                         initialCwd:
                             process.cwd(),
+                        defaultPermissionMode:
+                            "safe",
                     },
                 );
 
@@ -377,6 +383,8 @@ describe("runCli", () => {
 
                         initialCwd:
                             process.cwd(),
+                        defaultPermissionMode:
+                            "safe",
                     },
                 );
 
@@ -427,6 +435,8 @@ describe("runCli", () => {
 
                         initialCwd:
                             process.cwd(),
+                        defaultPermissionMode:
+                            "safe",
                     },
                 );
 
@@ -477,6 +487,8 @@ describe("runCli", () => {
 
                         initialCwd:
                             process.cwd(),
+                        defaultPermissionMode:
+                            "safe",
                     },
                 );
 
@@ -551,6 +563,8 @@ it(
                         model:
                             "default-model",
                     },
+                    defaultPermissionMode:
+                        "safe",
                 },
             );
 

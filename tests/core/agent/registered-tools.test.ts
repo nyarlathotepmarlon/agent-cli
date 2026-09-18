@@ -10,6 +10,8 @@ import { ToolRegistry } from "../../../src/core/tools/tool-registry.js";
 import { NodeDelay } from "../../../src/infrastructure/time/node-delay.js";
 import { addIntegersTool } from "../../../src/infrastructure/tools/add-integers-tool.js";
 import type {PermissionAuthorizer} from "../../../src/core/permissions/permission.js";
+import {HeuristicTokenEstimator} from "../../../src/core/context/token-estimator.js";
+import {DefaultContextManager} from "../../../src/core/context/default-context-manager.js";
 
 function response(
     toolCalls: readonly ToolCall[] = [],
@@ -68,7 +70,40 @@ it("feeds validation errors back and completes after corrected arguments", async
         id: "scripted",
         generate,
     };
+    function createContextManager() {
+        return new DefaultContextManager(
+            new HeuristicTokenEstimator(),
 
+            {
+                maxEstimatedInputTokens:
+                    1_000_000,
+
+                hotTurns:
+                    4,
+
+                minRetainedTurns:
+                    1,
+
+                hotAssistantChars:
+                    100_000,
+
+                hotToolResultChars:
+                    100_000,
+
+                coldAssistantChars:
+                    100_000,
+
+                coldToolResultChars:
+                    100_000,
+
+                emergencyAssistantChars:
+                    100_000,
+
+                emergencyToolResultChars:
+                    100_000,
+            },
+        );
+    }
     const runtime = new DefaultAgentRuntime(
         new ExponentialBackoffModelRetryPolicy({
             maxAttempts: 1,
@@ -76,6 +111,7 @@ it("feeds validation errors back and completes after corrected arguments", async
             maxDelayMs: 1,
         }),
         new NodeDelay(),
+        createContextManager()
     );
     const allowAllAuthorizer:
         PermissionAuthorizer = {

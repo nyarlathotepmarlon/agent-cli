@@ -48,6 +48,8 @@ import type {
 import type {
     ToolResult,
 } from "../../../src/core/tools/tool-result.js";
+import {DefaultContextManager} from "../../../src/core/context/default-context-manager.js";
+import {HeuristicTokenEstimator} from "../../../src/core/context/token-estimator.js";
 
 const limits = {
     maxTurns: 10,
@@ -180,7 +182,40 @@ class ScriptedToolRuntime
         return result;
     }
 }
+function createContextManager() {
+    return new DefaultContextManager(
+        new HeuristicTokenEstimator(),
 
+        {
+            maxEstimatedInputTokens:
+                1_000_000,
+
+            hotTurns:
+                4,
+
+            minRetainedTurns:
+                1,
+
+            hotAssistantChars:
+                100_000,
+
+            hotToolResultChars:
+                100_000,
+
+            coldAssistantChars:
+                100_000,
+
+            coldToolResultChars:
+                100_000,
+
+            emergencyAssistantChars:
+                100_000,
+
+            emergencyToolResultChars:
+                100_000,
+        },
+    );
+}
 function createRuntime(
     delay: Delay =
     new RecordingDelay(),
@@ -193,6 +228,7 @@ function createRuntime(
         }),
 
         delay,
+        createContextManager(),
     );
 }
 

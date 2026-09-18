@@ -1,5 +1,11 @@
 #!/usr/bin/env node
+import {
+    DefaultContextManager,
+} from "./core/context/default-context-manager.js";
 
+import {
+    HeuristicTokenEstimator,
+} from "./core/context/token-estimator.js";
 import {
     DefaultAgentRuntime,
 } from "./core/agent/agent-runtime.js";
@@ -125,11 +131,58 @@ try {
         });
     const permissionApprover =
         new NodePermissionApprover();
+    const contextManager =
+        new DefaultContextManager(
+            new HeuristicTokenEstimator(),
+
+            {
+                /*
+                 * Operational budget.
+                 *
+                 * This is NOT a claim about
+                 * any provider model's actual
+                 * maximum context window.
+                 */
+                maxEstimatedInputTokens:
+                    readPositiveInteger(
+                        process.env[
+                            "AGENT_CONTEXT_MAX_INPUT_TOKENS"
+                            ],
+
+                        32_000,
+                    ),
+
+                hotTurns:
+                    4,
+
+                minRetainedTurns:
+                    1,
+
+                hotAssistantChars:
+                    8_000,
+
+                hotToolResultChars:
+                    16_000,
+
+                coldAssistantChars:
+                    2_000,
+
+                coldToolResultChars:
+                    4_000,
+
+                emergencyAssistantChars:
+                    1_000,
+
+                emergencyToolResultChars:
+                    2_000,
+            },
+        );
     const runtime =
         new DefaultAgentRuntime(
             retryPolicy,
 
             new NodeDelay(),
+            contextManager
         );
 
 

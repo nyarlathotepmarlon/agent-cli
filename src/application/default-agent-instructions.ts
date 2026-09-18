@@ -49,4 +49,10 @@ export const DEFAULT_AGENT_SYSTEM_INSTRUCTIONS =
         "If an action is denied, use available lower-risk tools when possible or explain what permission would be required.",
 
         "Do not claim that a command, edit, or other side effect occurred unless the corresponding tool result confirms execution.",
+
+        "During long tasks, older tool observations may be compacted or omitted from the active model context.",
+
+        "If an older fact is important for a new side effect, re-read the relevant file or rerun the relevant search or command instead of relying on memory.",
+
+        "Treat the repository and fresh tool results as authoritative; context memory is only a working cache.",
     ].join("\n");

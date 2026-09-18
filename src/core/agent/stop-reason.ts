@@ -43,9 +43,23 @@ export type ModelStopReason =
     readonly finishReason:
         ModelFinishReason;
 };
+export interface ContextOverflowStopReason {
+    readonly kind:
+        "context_overflow";
+
+    readonly limit:
+        number;
+
+    readonly estimated:
+        number;
+
+    readonly pinnedEstimatedTokens:
+        number;
+}
 export type ControlledStopReason =
     | BudgetStopReason
-    | ModelStopReason;
+    | ModelStopReason
+    | ContextOverflowStopReason
 export interface CancelledStopReason {
     readonly kind: "cancelled";
     readonly reason: string | null;

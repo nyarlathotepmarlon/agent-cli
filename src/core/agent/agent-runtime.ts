@@ -47,6 +47,9 @@ import {
     stopAgent,
     stopAgentForBudget,
 } from "./agent-transition.js";
+import type {
+    ContextManager,
+} from "../context/context-manager.js";
 //描述运行一次Agent必须提供的东西
 export interface AgentRuntimeRequest {
     readonly state:
@@ -118,6 +121,8 @@ export class DefaultAgentRuntime
 
         private readonly delay:
         Delay,
+        private readonly contextManager:
+        ContextManager,
     ) {}
 
     public async run(
@@ -159,12 +164,55 @@ export class DefaultAgentRuntime
                         budgetReason,
                     );
                 }
+                // 根据AgentState中的messages以及tools构造上下文
+                const context =
+                    await this
+                        .contextManager
+                        .build(
+                            {
+                                messages:
+                                state.messages,
+
+                                tools:
+                                request
+                                    .toolRuntime
+                                    .definitions,
+                            },
+
+                            request.signal,
+                        );
+
+                if (!context.ok) {
+                    return stopAgent(
+                        state,
+
+                        {
+                            kind:
+                                "context_overflow",
+
+                            limit:
+                            context
+                                .error
+                                .limit,
+
+                            estimated:
+                            context
+                                .error
+                                .estimated,
+
+                            pinnedEstimatedTokens:
+                            context
+                                .error
+                                .pinnedEstimatedTokens,
+                        },
+                    );
+                }
                 // 构造ModelRequest
                 const modelRequest:
                     ModelRequest =
                     {
                         messages:
-                        state.messages,
+                        context.result.messages,
 
                         tools:
                         request

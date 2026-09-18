@@ -341,5 +341,15 @@ function formatStopReason(
 
         case "unknown_model_finish_reason":
             return `unknown model finish reason: ${reason.finishReason}`;
+        case "context_overflow":
+            return [
+                "context budget exceeded",
+
+                `estimated=${reason.estimated}`,
+
+                `limit=${reason.limit}`,
+
+                `pinned=${reason.pinnedEstimatedTokens}`,
+            ].join(" ");
     }
 }

@@ -50,6 +50,8 @@ import {
 } from "../../../src/core/tools/tool-registry.js";
 import {ModePermissionPolicy} from "../../../src/core/permissions/mode-permission-policy.js";
 import {DefaultPermissionAuthorizer} from "../../../src/core/permissions/default-permission-authorizer.js";
+import {DefaultContextManager} from "../../../src/core/context/default-context-manager.js";
+import {HeuristicTokenEstimator} from "../../../src/core/context/token-estimator.js";
 let temporary: string;
 let root: string;
 let outside: string;
@@ -566,7 +568,40 @@ it("binds each application run to its requested cwd and feeds file content back"
             throw new Error("Unexpected model request");
         },
     };
+    function createContextManager() {
+        return new DefaultContextManager(
+            new HeuristicTokenEstimator(),
 
+            {
+                maxEstimatedInputTokens:
+                    1_000_000,
+
+                hotTurns:
+                    4,
+
+                minRetainedTurns:
+                    1,
+
+                hotAssistantChars:
+                    100_000,
+
+                hotToolResultChars:
+                    100_000,
+
+                coldAssistantChars:
+                    100_000,
+
+                coldToolResultChars:
+                    100_000,
+
+                emergencyAssistantChars:
+                    100_000,
+
+                emergencyToolResultChars:
+                    100_000,
+            },
+        );
+    }
     const application = new DefaultAgentApplication({
         limits: {
             maxTurns: 6,
@@ -585,6 +620,7 @@ it("binds each application run to its requested cwd and feeds file content back"
                 maxDelayMs: 1,
             }),
             new NodeDelay(),
+            createContextManager()
         ),
 
         createToolRuntime:

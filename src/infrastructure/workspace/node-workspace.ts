@@ -60,7 +60,8 @@ export const MAX_SEARCH_RESULTS =
 // 限制一次搜索结果最多返回1200字符
 export const MAX_SEARCH_LINE_CHARS =
     1_200;
-
+const RESERVED_CONTROL_DIRECTORY =
+    ".agent";
 interface NodeTextDocument {
     readonly content: string;
 
@@ -119,7 +120,9 @@ export class NodeWorkspace implements Workspace,SearchWorkspace,EditableWorkspac
         this.assertInside(
             candidate,
         );
-
+        this.assertNotReserved(
+            candidate,
+        );
         if (
             candidate ===
             this.root
@@ -139,6 +142,9 @@ export class NodeWorkspace implements Workspace,SearchWorkspace,EditableWorkspac
             await realpath(
                 parentCandidate,
             );
+        this.assertNotReserved(
+            parent,
+        );
         // 校验父目录是否在workspace内
         this.assertInside(
             parent,
@@ -469,6 +475,13 @@ export class NodeWorkspace implements Workspace,SearchWorkspace,EditableWorkspac
             // 异步迭代器在结束、break 或抛错时关闭目录。
             for await (const entry of directory) {
                 signal.throwIfAborted();
+                // 跳过会话
+                if (
+                    entry.name ===
+                    RESERVED_CONTROL_DIRECTORY
+                ) {
+                    continue;
+                }
                 // 当列出的目录数量已经达到最大目录数量限额
                 if (entries.length === MAX_DIRECTORY_ENTRIES) {
                     truncated = true;
@@ -964,7 +977,17 @@ export class NodeWorkspace implements Workspace,SearchWorkspace,EditableWorkspac
             input.split(
                 /[\\/]/u,
             );
+        const firstSegment = segments[0];
+        if (
+            firstSegment ===
+            ".agent"
+        ) {
+            throw new WorkspaceError(
+                "reserved_path",
 
+                "Path is reserved for agent control-plane data",
+            );
+        }
         for (
             const segment
             of segments
@@ -1022,14 +1045,19 @@ export class NodeWorkspace implements Workspace,SearchWorkspace,EditableWorkspac
      */
     private async resolveExistingPath(input: string): Promise<string> {
         const segments=this.validatePathSegments(input);
+
         //拼接并按字符串层面检查越界
         const candidate = path.resolve(this.root, ...segments);
         this.assertInside(candidate);
-
+        this.assertNotReserved(
+            candidate,
+        );
         // realpath 会解析目录链接与符号链接，再检查一次真实位置，防止软链接越界
         const canonical = await realpath(candidate);
         this.assertInside(canonical);
-
+        this.assertNotReserved(
+            canonical,
+        );
         return canonical;
     }
 
@@ -1407,6 +1435,38 @@ export class NodeWorkspace implements Workspace,SearchWorkspace,EditableWorkspac
             },
         );
     }
+    private assertNotReserved(
+        target: string,
+    ): void {
+        const relative =
+            path.relative(
+                this.root,
+                target,
+            );
+
+        if (
+            relative === ""
+        ) {
+            return;
+        }
+
+        const segments =
+            relative.split(
+                path.sep,
+            );
+
+        if (
+            segments.includes(
+                RESERVED_CONTROL_DIRECTORY,
+            )
+        ) {
+            throw new WorkspaceError(
+                "reserved_path",
+
+                "Path is reserved for agent control-plane data",
+            );
+        }
+    }
 }
 
 function fileTooLarge(): WorkspaceError {
@@ -1693,6 +1753,12 @@ function ripgrepDirectoryExcludes():
 
         "--glob",
         "!**/node_modules/",
+
+        "--glob",
+        "!.agent/",
+
+        "--glob",
+        "!**/.agent/",
     ];
 }
 

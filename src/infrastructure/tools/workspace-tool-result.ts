@@ -27,7 +27,8 @@ const toolErrorCodes:
 
         outside_workspace:
             "permission_denied",
-
+        reserved_path:
+            "permission_denied",
         not_found:
             "not_found",
 
@@ -54,7 +55,8 @@ const toolErrorCodes:
 
         io_error:
             "execution_failed",
-        conflict:"conflict"
+        conflict:"conflict",
+
     };
 
 export async function workspaceToolResult<T extends JsonValue>(

@@ -23,6 +23,7 @@ import type {
     ControlledStopReason,
     FailureStopReason,
 } from "./stop-reason.js";
+import {renderToolResult} from "../tools/render-tool-result.js";
 
 /**
  *                     ┌─────────────┐
@@ -236,22 +237,3 @@ export function failAgent(
     };
 }
 
-/**
- * 将工具执行的结果转为string
- * @param result 工具调用的结果
- */
-function renderToolResult(
-    result: ToolResult,
-): string {
-    if (!result.ok) {
-        return JSON.stringify({
-            error: result.error,
-        });
-    }
-
-    if (typeof result.output === "string") {
-        return result.output;
-    }
-
-    return JSON.stringify(result.output);
-}

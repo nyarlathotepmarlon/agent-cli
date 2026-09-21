@@ -1,27 +1,45 @@
 #!/usr/bin/env node
-import {
-    DefaultContextManager,
-} from "./core/context/default-context-manager.js";
 
-import {
-    HeuristicTokenEstimator,
-} from "./core/context/token-estimator.js";
-import {
-    DefaultAgentRuntime,
-} from "./core/agent/agent-runtime.js";
-
-import {
-    ExponentialBackoffModelRetryPolicy,
-} from "./core/agent/model-retry-policy.js";
-
-import {
-    NodeDelay,
-} from "./infrastructure/time/node-delay.js";
-
-import {createWorkspaceToolRuntime} from "./infrastructure/tools/create-workspace-tool-runtime.js";
+/**
+ * PowerShell
+ *    │
+ *    │ argv
+ *    ▼
+ * index.ts
+ * Composition Root
+ *    │
+ *    ├── AbortController
+ *    ├── Node CLI IO
+ *    ├── Application
+ *    └── Version
+ *    │
+ *    ▼
+ * runCli()
+ *    │
+ *    ▼
+ * Commander
+ *    │
+ *    │ AgentRunRequest
+ *    ▼
+ * AgentApplication
+ *    │
+ *    ▼
+ * createAgentState()
+ *    │
+ *    ▼
+ * Core
+ */
+//组装入口
 import {
     DefaultAgentApplication,
 } from "./application/agent-application.js";
+import {
+    ModelRegistry,
+} from "./infrastructure/model/model-registry.js";
+
+import {
+    OpenAIModelProvider,
+} from "./infrastructure/model/openai/openai-model-provider.js";
 
 import {
     ExitCode,
@@ -38,35 +56,30 @@ import {
 import {
     runCli,
 } from "./cli/run-cli.js";
-import {ModelRegistry} from "./infrastructure/model/model-registry.js";
-import {OpenAIModelProvider} from "./infrastructure/model/openai/openai-model-provider.js";
 
-const controller =
-    new AbortController();
-// 记录中断次数
-let interruptCount = 0;
+import {
+    DefaultAgentRuntime,
+} from "./core/agent/agent-runtime.js";
 
-/**
- * sigint处理函数
- */
-function handleSigint(): void {
-    interruptCount += 1;
+import {
+    ExponentialBackoffModelRetryPolicy,
+} from "./core/agent/model-retry-policy.js";
 
-    if (interruptCount === 1) {
-        controller.abort();
+import {
+    NodeDelay,
+} from "./infrastructure/time/node-delay.js";
 
-        return;
-    }
-    // 当用户按Ctr+C不止一次，将会强制退出程序
-    process.exit(
-        ExitCode.Interrupted,
-    );
-}
-// 注册sigint监听器
-process.on(
-    "SIGINT",
-    handleSigint,
-);
+import {
+    DefaultAgentToolRuntime,
+} from "./core/tools/default-agent-tool-runtime.js";
+
+
+import {
+    addIntegersTool,
+} from "./infrastructure/tools/add-integers-tool.js";
+
+import {createWorkspaceToolRuntime} from "./infrastructure/tools/create-workspace-tool-runtime.js";
+
 import {
     DefaultPermissionAuthorizer,
 } from "./core/permissions/default-permission-authorizer.js";
@@ -78,9 +91,40 @@ import {
 import {
     NodePermissionApprover,
 } from "./cli/node-permission-approver.js";
+import {DefaultContextManager} from "./core/context/default-context-manager.js";
+import {HeuristicTokenEstimator} from "./core/context/token-estimator.js";
+import {JsonlSessionStore} from "./infrastructure/session/jsonl-session-store.js";
+
+const controller = new AbortController();
+
+let interruptCount = 0;
+
+/**
+ * 当收到SIGINT信号时候调用此函数
+ */
+function handleSigint(): void {
+    interruptCount += 1;
+    //第一次按下crtl+c时候优雅退出
+    if (interruptCount === 1) {
+        controller.abort();
+
+        return;
+    }
+    //当用户按ctrl+C不止一次，将会强制退出程序
+    process.exit(
+        ExitCode.Interrupted,
+    );
+}
+//注册SIGINT监听器
+process.on(
+    "SIGINT",
+    handleSigint,
+);
+//
 try {
     const version =
         await readPackageVersion();
+
     const modelRegistry =
         new ModelRegistry([
             new OpenAIModelProvider({
@@ -103,6 +147,7 @@ try {
                     ),
             }),
         ]);
+
     const retryPolicy =
         new ExponentialBackoffModelRetryPolicy({
             maxAttempts:
@@ -129,8 +174,8 @@ try {
                     5_000,
                 ),
         });
-    const permissionApprover =
-        new NodePermissionApprover();
+
+
     const contextManager =
         new DefaultContextManager(
             new HeuristicTokenEstimator(),
@@ -182,10 +227,12 @@ try {
             retryPolicy,
 
             new NodeDelay(),
-            contextManager
+
+            contextManager,
         );
 
 
+    const permissionApprover = new NodePermissionApprover();
     const application =
         new DefaultAgentApplication({
             limits: {
@@ -202,11 +249,13 @@ try {
 
             runtime,
 
-            createToolRuntime:async(request)=>{
+            sessionStore:
+                new JsonlSessionStore(),
+
+            createToolRuntime:async (request)=>{
                 const policy =
                     new ModePermissionPolicy(
-                        request
-                            .permissionMode,
+                        request.permissionMode,
                     );
 
                 const authorizer =
@@ -241,6 +290,10 @@ try {
                 controller.signal,
 
                 version,
+
+                initialCwd:
+                    process.cwd(),
+
                 defaultModelSelection: {
                     provider:
                         readEnvironmentVariable(
@@ -254,8 +307,7 @@ try {
                         ) ??
                         "gpt-5.5",
                 },
-                initialCwd:
-                    process.cwd(),
+
                 defaultPermissionMode:
                     "safe",
             },
@@ -281,6 +333,7 @@ try {
         handleSigint,
     );
 }
+
 
 function readEnvironmentVariable(
     name: string,

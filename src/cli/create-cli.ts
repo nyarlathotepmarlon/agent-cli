@@ -53,7 +53,9 @@ interface CliOptions {
     readonly provider: string;
 
     readonly model: string;
-    readonly permissionMode:PermissionMode
+    readonly permissionMode:PermissionMode;
+    readonly resume:
+        string | undefined;
 }
 
 export function createCli(
@@ -108,6 +110,11 @@ export function createCli(
 
             dependencies
                 .defaultPermissionMode,
+        )
+        .option(
+            "--resume <session-id>",
+
+            "resume a persisted agent session",
         )
         .showHelpAfterError(
             "(run with --help for usage)",
@@ -172,6 +179,9 @@ export function createCli(
                             permissionMode:
                             options
                                 .permissionMode,
+                            resumeSessionId:
+                                options.resume ??
+                                null,
                         },
                     );
                 // 将Agent运行结果转为退出码

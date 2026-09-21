@@ -50,6 +50,7 @@ import {
 import type {
     ContextManager,
 } from "../context/context-manager.js";
+import type {AgentRunRecorder} from "./agent-run-recorder.js";
 //描述运行一次Agent必须提供的东西
 export interface AgentRuntimeRequest {
     readonly state:
@@ -63,6 +64,8 @@ export interface AgentRuntimeRequest {
 
     readonly signal:
         AbortSignal;
+    readonly recorder:
+        AgentRunRecorder | null;
 }
 
 export interface AgentRuntime {
@@ -271,6 +274,17 @@ export class DefaultAgentRuntime
                         },
                     );
                 }
+                // 调用Recorder记录模型调用的结果
+                if (
+                    request.recorder !==
+                    null
+                ) {
+                    await request
+                        .recorder
+                        .recordModelCompleted(
+                            generated.response,
+                        );
+                }
                 // 调用模型成功
                 // 更新state维护的turns以及预算
                 state =
@@ -376,6 +390,17 @@ export class DefaultAgentRuntime
                             toolBudget,
                         );
                     }
+                    // tool调用之前，使用Recorder记录
+                    if (
+                        request.recorder !==
+                        null
+                    ) {
+                        await request
+                            .recorder
+                            .recordToolStarted(
+                                call,
+                            );
+                    }
                     // 执行具体的tool调用
                     const result =
                         await request
@@ -387,6 +412,19 @@ export class DefaultAgentRuntime
                                     request.signal,
                                 },
                             );
+                    // 工具执行完毕之后，调用Recorder记录
+                    if (
+                        request.recorder !==
+                        null
+                    ) {
+                        await request
+                            .recorder
+                            .recordToolCompleted(
+                                call,
+                                result,
+                            );
+                    }
+
                     // 更新state中的budget
                     state =
                         recordToolResult(

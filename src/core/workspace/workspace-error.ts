@@ -16,7 +16,8 @@ export type WorkspaceErrorCode =
     | "invalid_encoding"
     | "binary_file"
     | "search_failed"
-    | "io_error";
+    | "io_error"
+    | "reserved_path"
 
 export class WorkspaceError extends Error {
     public constructor(

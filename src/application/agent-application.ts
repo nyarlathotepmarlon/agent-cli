@@ -32,6 +32,11 @@ import {
     DEFAULT_AGENT_SYSTEM_INSTRUCTIONS,
 } from "./default-agent-instructions.js";
 import type {PermissionMode} from "../core/permissions/permission.js";
+import type {SessionLease, SessionStore} from "./session-store.js";
+import {replaySession} from "../core/session/session-replay.js";
+import type {ModelMessage} from "../core/model/model-message.js";
+import {SessionAgentRunRecorder} from "./session-agent-run-recorder.js";
+import {toJsonValue} from "../core/shared/json.js";
 
 export type AgentRunMode =
     | "interactive"
@@ -54,6 +59,8 @@ export interface AgentRunRequest {
         AbortSignal;
     readonly permissionMode:
         PermissionMode;
+    readonly resumeSessionId:
+        string | null;
 }
 
 interface AgentRunResultBase {
@@ -73,6 +80,8 @@ interface AgentRunResultBase {
         readonly id:
             string;
     };
+    readonly sessionId:
+        string | null;
 }
 // 等待输入：表示Agent尚未真正开始运行
 export interface AwaitingInputAgentRunResult
@@ -180,6 +189,8 @@ export interface DefaultAgentApplicationOptions {
 
     readonly systemInstructions?:
         string;
+    readonly sessionStore:
+        SessionStore;
 }
 
 export class DefaultAgentApplication
@@ -250,78 +261,239 @@ export class DefaultAgentApplication
 
                 output:
                     null,
+                sessionId:request.resumeSessionId
             };
         }
-        const toolRuntime=await this.options.createToolRuntime({
-            cwd:request.cwd, // 这是解析过后的工作区
-            signal:request.signal,
-            permissionMode:request.permissionMode,
-            mode:request.mode,
-        }
-        )
-        // 解析实际模型
-        const model =
-            this.options
-                .modelResolver
-                .resolve(
-                    request.model,
+        // 获取历史消息
+        const {
+            session,
+            messages: history,
+        } =
+            await this
+                .loadConversation(
+                    request,
                 );
-        // 创建Agent初始状态
-        const initialState =
-            createAgentState(
-                this.options.limits,
+        try{
+            // 解析实际模型
+            const model =
+                this.options
+                    .modelResolver
+                    .resolve(
+                        request.model,
+                    );
+            const toolRuntime=await this.options.createToolRuntime({
+                    cwd:session.workspaceRoot, // 这是解析过后的工作区
+                    signal:request.signal,
+                    permissionMode:request.permissionMode,
+                    mode:request.mode,
+                }
+            )
+            // 增加user message事件
+            await session.append({
+                type:
+                    "user.message",
 
-                [
-                    {
-                        role:
-                            "system",
+                content:
+                request.prompt,
 
-                        content:
-                            [
-                                this.systemInstructions,
+                model: {
+                    provider:
+                    model.provider,
 
-                                "",
+                    model:
+                    model.id,
+                },
 
-                                `Workspace root: ${JSON.stringify(
-                                    request.cwd,
-                                )}`,
-                            ].join("\n"),
-                    },
+                permissionMode:
+                request
+                    .permissionMode,
 
-                    {
-                        role:
-                            "user",
+                runMode:
+                request.mode,
+            });
+            // 创建Agent初始状态
+            const initialState =
+                createAgentState(
+                    this.options.limits,
 
-                        content:
-                        request.prompt,
-                    },
-                ],
+                    [
+                        ...history,
+
+                        {
+                            role:
+                                "user",
+
+                            content:
+                            request.prompt,
+                        },
+                    ],
+                );
+            // 将领域状态转换为应用结果
+            const state =
+                await this.options
+                    .runtime
+                    .run(
+                        {
+                            state:
+                            initialState,
+
+                            model,
+
+                            toolRuntime:
+                            toolRuntime,
+                            recorder:new SessionAgentRunRecorder(session),
+                            signal:
+                            request.signal,
+                        },
+                    );
+            /*
+     * Do NOT use request.signal here.
+     *
+     * Even if Ctrl+C caused terminal
+     * state, run.finished must still
+     * be durably recorded.
+     */
+            await session.append({
+                type:
+                    "run.finished",
+
+                status:
+                state.status,
+
+                reason:
+                    toJsonValue(
+                        state.stopReason,
+                    ),
+            });
+            return createRunResult(
+                request,
+                state,
+                model.provider,
+                model.id,
+                session.sessionId,
             );
-        // 将领域状态转换为应用结果
-        const state =
-            await this.options
-                .runtime
-                .run(
-                    {
-                        state:
-                        initialState,
+        }finally {
+            await session.close();
+        }
+    }
 
-                        model,
+    private createSystemMessage(
+        cwd: string,
+    ):
+        import(
+            "../core/model/model-message.js"
+            ).SystemModelMessage {
+        return {
+            role:
+                "system",
 
-                        toolRuntime:
-                        toolRuntime,
+            content:
+                [
+                    this.systemInstructions,
 
-                        signal:
+                    "",
+
+                    `Workspace root: ${JSON.stringify(
+                        cwd,
+                    )}`,
+                ].join(
+                    "\n",
+                ),
+        };
+    }
+    private async loadConversation(
+        request:
+        AgentRunRequest,
+    ): Promise<{
+        readonly session:
+            SessionLease;
+
+        readonly messages:
+            readonly ModelMessage[];
+    }> {
+        if (
+            request.resumeSessionId ===
+            null
+        ) {
+            const session =
+                await this.options
+                    .sessionStore
+                    .create(
+                        request.cwd,
+
                         request.signal,
-                    },
+                    );
+
+            return {
+                session,
+
+                messages: [
+                    this.createSystemMessage(
+                        session.workspaceRoot,
+                    ),
+                ],
+            };
+        }
+
+        const session =
+            await this.options
+                .sessionStore
+                .open(
+                    request.cwd,
+
+                    request
+                        .resumeSessionId,
+
+                    request.signal,
                 );
-        // 返回 AgentRunResult
-        return createRunResult(
-            request,
-            state,
-            model.provider,
-            model.id,
-        );
+
+        let replay =
+            replaySession(
+                session.events,
+            );
+
+        /*
+         * Previous process died without
+         * producing run.finished.
+         *
+         * Close it durably before beginning
+         * another run.
+         */
+        if (
+            replay.hasOpenRun
+        ) {
+            await session
+                .append({
+                    type:
+                        "run.finished",
+
+                    status:
+                        "interrupted",
+
+                    reason: {
+                        kind:
+                            "process_ended_without_terminal_event",
+                    },
+                });
+
+            replay =
+                replaySession(
+                    session.events,
+                );
+        }
+
+        return {
+            session,
+
+            messages: [
+                this.createSystemMessage(
+                    session
+                        .workspaceRoot,
+                ),
+
+                ...replay.messages,
+            ],
+        };
     }
 }
 
@@ -330,6 +502,7 @@ function createRunResult(
     state: TerminalAgentState,
     provider: string,
     modelId: string,
+    sessionId:string|null,
 ): AgentRunResult {
     // 获取最终LLM的输出，从消息数组中寻找最后一条assistant消息
     const output =
@@ -353,6 +526,7 @@ function createRunResult(
             id:
             modelId,
         },
+        sessionId
     } as const;
     // state的状态对应结果的状态
     switch (state.status) {
@@ -416,21 +590,24 @@ function getLastAssistantContent(
 ): string | null {
     for (
         let index =
-            state.messages.length - 1;
+            state.steps.length - 1;
 
         index >= 0;
 
         index -= 1
     ) {
-        const message =
-            state.messages[index];
+        const step =
+            state.steps[index];
 
         if (
-            message !== undefined &&
-            message.role ===
-            "assistant"
+            step !== undefined &&
+            step.kind ===
+            "model"
         ) {
-            return message.content;
+            return step
+                .response
+                .message
+                .content;
         }
     }
 
